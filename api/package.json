@@ -1,0 +1,16 @@
+{
+  "name": "lab-inventory-api",
+  "version": "1.0.0",
+  "description": "Lab Inventory Azure Functions API",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.0",
+    "@azure/functions": "^4.0.0",
+    "bcryptjs": "^3.0.2",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^11.1.0"
+  }
+}
