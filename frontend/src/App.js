@@ -22,8 +22,8 @@ function SubNav() {
   if (location.pathname.startsWith('/inventory')) {
     return (
       <div className="sub-nav">
-        <NavLink to="/inventory" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📋 Reagents</NavLink>
-        <NavLink to="/inventory/samples" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🧫 Samples</NavLink>
+        <NavLink to="/inventory" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🧫 Samples</NavLink>
+        <NavLink to="/inventory/reagents" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📋 Reagents</NavLink>
         <NavLink to="/inventory/notifications" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🔔 Alerts</NavLink>
         <NavLink to="/inventory/storage" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🗄️ Storage</NavLink>
         <NavLink to="/inventory/catalog" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📚 Catalog</NavLink>
@@ -85,8 +85,8 @@ function AppContent({ user, setUser, handleLogout }) {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Hub user={user} />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/inventory/samples" element={<Samples />} />
+          <Route path="/inventory" element={<Samples />} />
+          <Route path="/inventory/reagents" element={<Inventory />} />
           <Route path="/inventory/notifications" element={<Notifications />} />
           <Route path="/inventory/storage" element={<Storage />} />
           <Route path="/inventory/catalog" element={<Catalog />} />

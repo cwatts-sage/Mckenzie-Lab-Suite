@@ -1,23 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { notebookAPI, experimentAPI, reagentAPI, sampleAPI, storageAPI } from '../api';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
-const ENTRY_TYPE_COLORS = {
-  protocol: '#3498db',
-  observation: '#9b59b6',
-  result: '#27ae60',
-  note: '#95a5a6',
-};
-
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', desc: 'Steps followed' },
-  { value: 'observation', label: '👁️ Observation', desc: 'What was seen/measured' },
   { value: 'result', label: '📊 Result', desc: 'Data & conclusions' },
   { value: 'note', label: '📝 Note', desc: 'General notes' },
 ];
 
 function Notebook() {
+  const navigate = useNavigate();
   const [entries, setEntries] = useState([]);
   const [experiments, setExperiments] = useState([]);
   const [reagents, setReagents] = useState([]);
@@ -40,12 +33,7 @@ function Notebook() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [search, setSearch] = useState('');
 
-  // Calendar + Scratch Pad panel
-  const [toolsPanelOpen, setToolsPanelOpen] = useState(false);
-  const [calendarDate, setCalendarDate] = useState(new Date());
-  const [scratchPad, setScratchPad] = useState('');
-  const scratchPadTimer = useRef(null);
-  const [scratchSaving, setScratchSaving] = useState(false);
+
 
   // Form
   const emptyForm = { title: '', content: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'note', linked_items: [] };
@@ -157,7 +145,7 @@ function Notebook() {
 
     const cursorPos = e.target.selectionStart;
     const textBeforeCursor = val.substring(0, cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    const atMatch = textBeforeCursor.match(/@([\w.\-/]*)$/);
 
     if (atMatch) {
       setMentionSearch(atMatch[1].toLowerCase());
@@ -218,7 +206,7 @@ function Notebook() {
     const cursorPos = textarea ? textarea.selectionStart : (form.content || '').length;
     const textBeforeCursor = (form.content || '').substring(0, cursorPos);
     const textAfterCursor = (form.content || '').substring(cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    const atMatch = textBeforeCursor.match(/@([\w.\-/]*)$/);
 
     if (atMatch) {
       const newBefore = textBeforeCursor.substring(0, atMatch.index) + `@[${name}]`;
@@ -244,11 +232,32 @@ function Notebook() {
 
   const getMentionResults = () => {
     const s = mentionSearch;
+    const currentExpId = form.experiment_id;
+
+    const matchingReagents = reagents.filter(r => (r.name || '').toLowerCase().includes(s) || (r.catalog_number || '').toLowerCase().includes(s));
+    const matchingSamples = samples.filter(r => (r.name || '').toLowerCase().includes(s));
+
+    // Separate experiment-linked vs unlinked samples
+    const linkedSamples = currentExpId ? matchingSamples.filter(sa => sa.experiment_id === currentExpId) : [];
+    const unlinkedSamples = currentExpId ? matchingSamples.filter(sa => sa.experiment_id !== currentExpId) : matchingSamples;
+
     const results = [];
-    reagents.filter(r => (r.name || '').toLowerCase().includes(s) || (r.catalog_number || '').toLowerCase().includes(s))
-      .slice(0, 5).forEach(r => results.push({ type: 'reagent', item: r, label: `📦 ${r.name}${r.catalog_number ? ` (${r.catalog_number})` : ''}` }));
-    samples.filter(r => (r.name || '').toLowerCase().includes(s))
-      .slice(0, 5).forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+
+    // Linked samples first
+    if (linkedSamples.length > 0) {
+      results.push({ type: 'header', label: '🔗 Linked to this experiment' });
+      linkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+    }
+
+    // Then reagents and unlinked samples
+    if (matchingReagents.length > 0 || unlinkedSamples.length > 0) {
+      if (linkedSamples.length > 0) {
+        results.push({ type: 'header', label: '📂 Other items' });
+      }
+      matchingReagents.forEach(r => results.push({ type: 'reagent', item: r, label: `📦 ${r.name}${r.catalog_number ? ` (${r.catalog_number})` : ''}` }));
+      unlinkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+    }
+
     return results;
   };
 
@@ -304,8 +313,17 @@ function Notebook() {
           <span key={i} style={{
             background: linked?.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
             padding: '1px 6px', borderRadius: 4, fontWeight: 500,
-            fontSize: '0.9em', cursor: 'default'
-          }} title={linked ? `${linked.type}: ${linked.name}` : name}>
+            fontSize: '0.9em', cursor: linked ? 'pointer' : 'default',
+            textDecoration: linked ? 'none' : 'none'
+          }} title={linked ? `Click to view ${linked.type}: ${linked.name}` : name}
+            onClick={() => {
+              if (linked) {
+                navigate(linked.type === 'reagent' ? '/inventory/reagents' : '/inventory');
+              }
+            }}
+            onMouseOver={(e) => { if (linked) e.currentTarget.style.opacity = '0.7'; }}
+            onMouseOut={(e) => { if (linked) e.currentTarget.style.opacity = '1'; }}
+          >
             @{name}
           </span>
         );
@@ -330,55 +348,7 @@ function Notebook() {
     });
   };
 
-  // Calendar helpers
-  const calYear = calendarDate.getFullYear();
-  const calMonth = calendarDate.getMonth();
-  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-  const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
 
-  const getEntryDatesMap = useCallback(() => {
-    const map = {};
-    entries.forEach(e => {
-      if (e.entry_date) {
-        if (!map[e.entry_date]) map[e.entry_date] = new Set();
-        map[e.entry_date].add(e.entry_type);
-      }
-    });
-    return map;
-  }, [entries]);
-
-  const entryDatesMap = getEntryDatesMap();
-
-  const scrollToDate = (dateStr) => {
-    const el = document.getElementById(`date-group-${dateStr}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
-  // Scratch pad auto-save for filtered experiment
-  const handleScratchPadChange = (val) => {
-    setScratchPad(val);
-    if (scratchPadTimer.current) clearTimeout(scratchPadTimer.current);
-    scratchPadTimer.current = setTimeout(async () => {
-      if (!filterExperiment) return;
-      setScratchSaving(true);
-      try {
-        await experimentAPI.update(filterExperiment, { scratch_pad: val });
-      } catch (e) { /* silent fail */ }
-      setScratchSaving(false);
-    }, 1000);
-  };
-
-  // Load scratch pad when experiment filter changes
-  useEffect(() => {
-    if (filterExperiment) {
-      const exp = experiments.find(e => e.id === filterExperiment);
-      setScratchPad(exp ? (exp.scratch_pad || '') : '');
-    } else {
-      setScratchPad('');
-    }
-  }, [filterExperiment, experiments]);
 
   // Group by date view
   const groupByDate = () => {
@@ -415,94 +385,6 @@ function Notebook() {
           </select>
           <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="From date" />
           <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} title="To date" />
-        </div>
-
-        {/* Collapsible Calendar & Notes panel */}
-        <div style={{marginBottom:16}}>
-          <button
-            className="btn btn-sm btn-secondary"
-            onClick={() => setToolsPanelOpen(!toolsPanelOpen)}
-            style={{width:'100%',textAlign:'left',padding:'10px 16px',fontSize:'0.9rem',fontWeight:500}}
-          >
-            {toolsPanelOpen ? '📅 Calendar & Notes ▲' : '📅 Calendar & Notes ▼'}
-          </button>
-          {toolsPanelOpen && (
-            <div style={{display:'flex',gap:20,marginTop:12,flexWrap:'wrap'}}>
-              {/* Mini Monthly Calendar */}
-              <div style={{width:280,minWidth:240,border:'1px solid #eee',borderRadius:12,padding:16,background:'#fafafa'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth - 1, 1))}>←</button>
-                  <strong style={{fontSize:'0.9rem'}}>
-                    {calendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
-                  </strong>
-                  <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth + 1, 1))}>→</button>
-                </div>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:2,textAlign:'center',fontSize:'0.75rem'}}>
-                  {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
-                    <div key={d} style={{fontWeight:600,color:'#888',padding:4}}>{d}</div>
-                  ))}
-                  {Array.from({ length: firstDayOfWeek }).map((_, i) => <div key={`empty-${i}`} />)}
-                  {Array.from({ length: daysInMonth }).map((_, i) => {
-                    const day = i + 1;
-                    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    const entryTypes = entryDatesMap[dateStr];
-                    const hasEntries = !!entryTypes;
-                    const isToday = dateStr === new Date().toISOString().split('T')[0];
-
-                    return (
-                      <div
-                        key={day}
-                        onClick={() => hasEntries && scrollToDate(dateStr)}
-                        style={{
-                          padding:4,
-                          borderRadius:6,
-                          cursor: hasEntries ? 'pointer' : 'default',
-                          background: isToday ? '#eef4fb' : 'transparent',
-                          fontWeight: isToday ? 700 : 400,
-                          position:'relative'
-                        }}
-                      >
-                        {day}
-                        {hasEntries && (
-                          <div style={{display:'flex',gap:1,justifyContent:'center',marginTop:1}}>
-                            {[...entryTypes].slice(0,3).map((t, j) => (
-                              <div key={j} style={{width:5,height:5,borderRadius:'50%',background:ENTRY_TYPE_COLORS[t] || '#95a5a6'}} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Scratch Pad */}
-              <div style={{flex:1,minWidth:240,border:'1px solid #eee',borderRadius:12,padding:16,background:'#fafafa'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                  <label style={{fontSize:'0.85rem',fontWeight:600,color:'#444'}}>📝 Scratch Pad</label>
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    {scratchSaving && <span style={{fontSize:'0.7rem',color:'#888'}}>Saving...</span>}
-                  </div>
-                </div>
-                {filterExperiment ? (
-                  <textarea
-                    value={scratchPad}
-                    onChange={(e) => handleScratchPadChange(e.target.value)}
-                    placeholder="Quick notes, ideas, to-dos for this experiment..."
-                    rows={6}
-                    style={{
-                      width:'100%',resize:'vertical',border:'1px solid #eee',borderRadius:8,
-                      padding:10,fontSize:'0.85rem',fontFamily:'inherit',lineHeight:1.5
-                    }}
-                  />
-                ) : (
-                  <div style={{color:'#999',fontSize:'0.85rem',padding:12,textAlign:'center',lineHeight:1.6}}>
-                    Select an experiment to see its scratch pad, or visit the <strong>Notes</strong> tab
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
         {entries.length === 0 ? (
@@ -572,9 +454,9 @@ function Notebook() {
                 <div style={{
                   position:'absolute', bottom:'calc(100% - 40px)', left:0, right:0,
                   background:'white', border:'1px solid #ddd', borderRadius:8,
-                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)', maxHeight:200, overflowY:'auto', zIndex:200
+                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)', maxHeight:320, overflowY:'auto', zIndex:200
                 }}>
-                  {getMentionResults().length === 0 ? (
+                  {getMentionResults().filter(r => r.type !== 'header').length === 0 ? (
                     <div style={{padding:12}}>
                       <div style={{color:'#999', fontSize:'0.9rem', marginBottom:8}}>No matches found</div>
                       <div style={{display:'flex',gap:8}}>
@@ -597,13 +479,19 @@ function Notebook() {
                   ) : (
                     <>
                       {getMentionResults().map((r, i) => (
-                        <div key={i} style={{padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f0f0', fontSize:'0.9rem'}}
-                          onClick={() => insertMention(r.type, r.item)}
-                          onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
-                          onMouseOut={(e) => e.currentTarget.style.background = 'white'}
-                        >
-                          {r.label}
-                        </div>
+                        r.type === 'header' ? (
+                          <div key={i} style={{padding:'6px 14px', fontSize:'0.75rem', fontWeight:600, color:'#888', textTransform:'uppercase', background:'#f8f9fa', borderBottom:'1px solid #eee'}}>
+                            {r.label}
+                          </div>
+                        ) : (
+                          <div key={i} style={{padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f0f0', fontSize:'0.9rem'}}
+                            onClick={() => insertMention(r.type, r.item)}
+                            onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
+                            onMouseOut={(e) => e.currentTarget.style.background = 'white'}
+                          >
+                            {r.label}
+                          </div>
+                        )
                       ))}
                       <div style={{padding:'8px 14px',borderTop:'1px solid #eee',display:'flex',gap:8}}>
                         <button className="btn btn-sm btn-secondary" onClick={() => {
@@ -789,7 +677,7 @@ function Notebook() {
     return (
       <div key={entry.id} style={{
         border:'1px solid #eee', borderRadius:12, padding:16, marginBottom:10,
-        borderLeft:`4px solid ${entry.entry_type === 'protocol' ? '#3498db' : entry.entry_type === 'observation' ? '#9b59b6' : entry.entry_type === 'result' ? '#27ae60' : '#95a5a6'}`
+        borderLeft:`4px solid ${entry.entry_type === 'protocol' ? '#3498db' : entry.entry_type === 'result' ? '#27ae60' : '#95a5a6'}`
       }}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8}}>
           <div style={{flex:1}}>

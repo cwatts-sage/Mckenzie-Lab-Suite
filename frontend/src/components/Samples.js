@@ -13,6 +13,7 @@ function Samples() {
   const [search, setSearch] = useState('');
   const [filterUnit, setFilterUnit] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterExperiment, setFilterExperiment] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingSample, setEditingSample] = useState(null);
   const [form, setForm] = useState(getEmptyForm());
@@ -42,6 +43,7 @@ function Samples() {
       if (search) params.search = search;
       if (filterUnit) params.unit_id = filterUnit;
       if (filterStatus) params.status = filterStatus;
+      if (filterExperiment) params.experiment_id = filterExperiment;
 
       const [samplesRes, unitsRes, locsRes, expsRes] = await Promise.all([
         sampleAPI.getAll(params),
@@ -59,7 +61,7 @@ function Samples() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterUnit, filterStatus]);
+  }, [search, filterUnit, filterStatus, filterExperiment]);
 
   useEffect(() => {
     fetchData();
@@ -201,6 +203,12 @@ function Samples() {
             <option value="">All Storage</option>
             {storageUnits.map(u => (
               <option key={u.id} value={u.id}>{u.name} ({u.temperature})</option>
+            ))}
+          </select>
+          <select value={filterExperiment} onChange={(e) => setFilterExperiment(e.target.value)}>
+            <option value="">All Experiments</option>
+            {experiments.map(exp => (
+              <option key={exp.id} value={exp.id}>{exp.title}</option>
             ))}
           </select>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>

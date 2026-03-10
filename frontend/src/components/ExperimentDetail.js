@@ -12,7 +12,6 @@ const STATUS_OPTIONS = [
 
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', color: '#3498db' },
-  { value: 'observation', label: '👁️ Observation', color: '#9b59b6' },
   { value: 'result', label: '📊 Result', color: '#27ae60' },
   { value: 'note', label: '📝 Note', color: '#95a5a6' },
 ];
@@ -230,7 +229,7 @@ function ExperimentDetail() {
     setEntryForm({ ...entryForm, content: val });
     const cursorPos = e.target.selectionStart;
     const textBeforeCursor = val.substring(0, cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    const atMatch = textBeforeCursor.match(/@([\w.\-/]*)$/);
     if (atMatch) {
       setMentionSearch(atMatch[1].toLowerCase());
       setMentionOpen(true);
@@ -244,7 +243,7 @@ function ExperimentDetail() {
     const cursorPos = textarea ? textarea.selectionStart : (entryForm.content || '').length;
     const textBeforeCursor = (entryForm.content || '').substring(0, cursorPos);
     const textAfterCursor = (entryForm.content || '').substring(cursorPos);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    const atMatch = textBeforeCursor.match(/@([\w.\-/]*)$/);
     if (atMatch) {
       const newBefore = textBeforeCursor.substring(0, atMatch.index) + `@[${item.name}]`;
       setEntryForm(prev => ({
@@ -266,11 +265,31 @@ function ExperimentDetail() {
 
   const getMentionResults = () => {
     const s = mentionSearch;
+
+    const matchingReagents = reagents.filter(r => (r.name || '').toLowerCase().includes(s) || (r.catalog_number || '').toLowerCase().includes(s));
+    const matchingSamples = samples.filter(r => (r.name || '').toLowerCase().includes(s));
+
+    // Separate experiment-linked vs unlinked samples
+    const linkedSamples = matchingSamples.filter(sa => sa.experiment_id === id);
+    const unlinkedSamples = matchingSamples.filter(sa => sa.experiment_id !== id);
+
     const results = [];
-    reagents.filter(r => (r.name || '').toLowerCase().includes(s) || (r.catalog_number || '').toLowerCase().includes(s))
-      .slice(0, 5).forEach(r => results.push({ type: 'reagent', item: r, label: `📦 ${r.name}${r.catalog_number ? ` (${r.catalog_number})` : ''}` }));
-    samples.filter(r => (r.name || '').toLowerCase().includes(s))
-      .slice(0, 5).forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+
+    // Linked samples first
+    if (linkedSamples.length > 0) {
+      results.push({ type: 'header', label: '🔗 Linked to this experiment' });
+      linkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+    }
+
+    // Then reagents and unlinked samples
+    if (matchingReagents.length > 0 || unlinkedSamples.length > 0) {
+      if (linkedSamples.length > 0) {
+        results.push({ type: 'header', label: '📂 Other items' });
+      }
+      matchingReagents.forEach(r => results.push({ type: 'reagent', item: r, label: `📦 ${r.name}${r.catalog_number ? ` (${r.catalog_number})` : ''}` }));
+      unlinkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+    }
+
     return results;
   };
 
@@ -395,8 +414,16 @@ function ExperimentDetail() {
           <span key={i} style={{
             background: linked?.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
             padding: '1px 6px', borderRadius: 4, fontWeight: 500,
-            fontSize: '0.9em', cursor: 'default'
-          }} title={linked ? `${linked.type}: ${linked.name}` : name}>
+            fontSize: '0.9em', cursor: linked ? 'pointer' : 'default'
+          }} title={linked ? `Click to view ${linked.type}: ${linked.name}` : name}
+            onClick={() => {
+              if (linked) {
+                navigate(linked.type === 'reagent' ? '/inventory/reagents' : '/inventory');
+              }
+            }}
+            onMouseOver={(e) => { if (linked) e.currentTarget.style.opacity = '0.7'; }}
+            onMouseOut={(e) => { if (linked) e.currentTarget.style.opacity = '1'; }}
+          >
             @{name}
           </span>
         );
@@ -522,7 +549,7 @@ function ExperimentDetail() {
                 <span key={i} style={{
                   background: s.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
                   padding:'4px 10px', borderRadius:12, fontSize:'0.8rem', fontWeight:500, cursor:'pointer'
-                }} onClick={() => navigate(s.type === 'reagent' ? '/inventory' : '/inventory/samples')}
+                }} onClick={() => navigate(s.type === 'reagent' ? '/inventory/reagents' : '/inventory')}
                    title={`${s.type}: ${s.name}`}>
                   {s.type === 'reagent' ? '📦' : '🧫'} {s.name}
                 </span>
@@ -540,7 +567,7 @@ function ExperimentDetail() {
                 <span key={i} style={{
                   background: c.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
                   padding:'4px 10px', borderRadius:12, fontSize:'0.8rem', fontWeight:500, cursor:'pointer'
-                }} onClick={() => navigate(c.type === 'reagent' ? '/inventory' : '/inventory/samples')}
+                }} onClick={() => navigate(c.type === 'reagent' ? '/inventory/reagents' : '/inventory')}
                    title={`${c.type}: ${c.name}`}>
                   {c.type === 'reagent' ? '📦' : '🧫'} {c.name}
                 </span>
@@ -985,9 +1012,9 @@ function ExperimentDetail() {
                 <div style={{
                   position:'absolute',bottom:'calc(100% - 40px)',left:0,right:0,
                   background:'white',border:'1px solid #ddd',borderRadius:8,
-                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)',maxHeight:200,overflowY:'auto',zIndex:200
+                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)',maxHeight:320,overflowY:'auto',zIndex:200
                 }}>
-                  {getMentionResults().length === 0 ? (
+                  {getMentionResults().filter(r => r.type !== 'header').length === 0 ? (
                     <div style={{padding:12}}>
                       <div style={{color:'#999',fontSize:'0.9rem',marginBottom:8}}>No matches found</div>
                       <div style={{display:'flex',gap:8}}>
@@ -1014,13 +1041,19 @@ function ExperimentDetail() {
                   ) : (
                     <>
                       {getMentionResults().map((r, i) => (
-                        <div key={i} style={{padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',fontSize:'0.9rem'}}
-                          onClick={() => insertMention(r.type, r.item)}
-                          onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
-                          onMouseOut={(e) => e.currentTarget.style.background = 'white'}
-                        >
-                          {r.label}
-                        </div>
+                        r.type === 'header' ? (
+                          <div key={i} style={{padding:'6px 14px', fontSize:'0.75rem', fontWeight:600, color:'#888', textTransform:'uppercase', background:'#f8f9fa', borderBottom:'1px solid #eee'}}>
+                            {r.label}
+                          </div>
+                        ) : (
+                          <div key={i} style={{padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',fontSize:'0.9rem'}}
+                            onClick={() => insertMention(r.type, r.item)}
+                            onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
+                            onMouseOut={(e) => e.currentTarget.style.background = 'white'}
+                          >
+                            {r.label}
+                          </div>
+                        )
                       ))}
                       <div style={{padding:'8px 14px',borderTop:'1px solid #eee',display:'flex',gap:8}}>
                         <button className="btn btn-sm btn-secondary" onClick={() => {

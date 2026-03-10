@@ -100,6 +100,11 @@ app.http('samplesGet', {
         samples = samples.filter(r => r.status === status);
       }
 
+      const experimentId = req.query.get('experiment_id');
+      if (experimentId) {
+        samples = samples.filter(r => r.experiment_id === experimentId);
+      }
+
       samples.sort((a, b) => (b.date_collected || '').localeCompare(a.date_collected || '') || (a.name || '').localeCompare(b.name || ''));
       return jsonResponse(200, samples);
     } catch (e) {
