@@ -155,10 +155,21 @@ function Notebook() {
   };
 
   // Cmd+K handler
+  const [linkSelectionRange, setLinkSelectionRange] = useState(null);
   const handleContentKeyDown = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       e.preventDefault();
-      setLinkText('');
+      const textarea = contentRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selectedText = form.content.substring(start, end);
+        setLinkText(selectedText || '');
+        setLinkSelectionRange(start !== end ? { start, end } : null);
+      } else {
+        setLinkText('');
+        setLinkSelectionRange(null);
+      }
       setLinkUrl('');
       setShowLinkPopover(true);
     }
@@ -167,12 +178,21 @@ function Notebook() {
   const insertHyperlink = () => {
     if (!linkText || !linkUrl) return;
     const textarea = contentRef.current;
-    const cursorPos = textarea.selectionStart;
-    const before = form.content.substring(0, cursorPos);
-    const after = form.content.substring(cursorPos);
     const linkMarkdown = `[${linkText}](${linkUrl})`;
-    setForm({ ...form, content: before + linkMarkdown + after });
+    if (linkSelectionRange) {
+      // Replace the selected text with the hyperlink
+      const before = form.content.substring(0, linkSelectionRange.start);
+      const after = form.content.substring(linkSelectionRange.end);
+      setForm({ ...form, content: before + linkMarkdown + after });
+    } else {
+      // Insert at cursor position
+      const cursorPos = textarea ? textarea.selectionStart : form.content.length;
+      const before = form.content.substring(0, cursorPos);
+      const after = form.content.substring(cursorPos);
+      setForm({ ...form, content: before + linkMarkdown + after });
+    }
     setShowLinkPopover(false);
+    setLinkSelectionRange(null);
     setTimeout(() => textarea && textarea.focus(), 50);
   };
 
@@ -470,10 +490,10 @@ function Notebook() {
                 }} onClick={(e) => e.stopPropagation()}>
                   <div style={{fontWeight:600,fontSize:'0.9rem',marginBottom:8}}>🔗 Insert Link</div>
                   <div className="form-group" style={{marginBottom:8}}>
-                    <input value={linkText} onChange={(e) => setLinkText(e.target.value)} placeholder="Link text" style={{fontSize:'0.85rem',padding:8}} autoFocus />
+                    <input value={linkText} onChange={(e) => setLinkText(e.target.value)} placeholder="Link text" style={{fontSize:'0.85rem',padding:8}} autoFocus={!linkText} />
                   </div>
                   <div className="form-group" style={{marginBottom:8}}>
-                    <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." style={{fontSize:'0.85rem',padding:8}} />
+                    <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." style={{fontSize:'0.85rem',padding:8}} autoFocus={!!linkText} />
                   </div>
                   <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
                     <button className="btn btn-sm btn-secondary" onClick={() => setShowLinkPopover(false)}>Cancel</button>
