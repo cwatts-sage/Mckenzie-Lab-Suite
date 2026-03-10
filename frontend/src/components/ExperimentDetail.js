@@ -239,17 +239,24 @@ function ExperimentDetail() {
 
   const insertMention = (type, item) => {
     const textarea = contentRef.current;
-    const cursorPos = textarea.selectionStart;
-    const textBeforeCursor = entryForm.content.substring(0, cursorPos);
-    const textAfterCursor = entryForm.content.substring(cursorPos);
+    const cursorPos = textarea ? textarea.selectionStart : (entryForm.content || '').length;
+    const textBeforeCursor = (entryForm.content || '').substring(0, cursorPos);
+    const textAfterCursor = (entryForm.content || '').substring(cursorPos);
     const atMatch = textBeforeCursor.match(/@(\w*)$/);
     if (atMatch) {
       const newBefore = textBeforeCursor.substring(0, atMatch.index) + `@[${item.name}]`;
-      setEntryForm({
-        ...entryForm,
+      setEntryForm(prev => ({
+        ...prev,
         content: newBefore + textAfterCursor,
-        linked_items: [...entryForm.linked_items.filter(li => !(li.id === item.id && li.type === type)), { type, id: item.id, name: item.name }]
-      });
+        linked_items: [...prev.linked_items.filter(li => !(li.id === item.id && li.type === type)), { type, id: item.id, name: item.name }]
+      }));
+    } else {
+      // Fallback: append mention at end (used after quick-create when cursor is lost)
+      setEntryForm(prev => ({
+        ...prev,
+        content: (prev.content || '') + `@[${item.name}] `,
+        linked_items: [...prev.linked_items.filter(li => !(li.id === item.id && li.type === type)), { type, id: item.id, name: item.name }]
+      }));
     }
     setMentionOpen(false);
     setTimeout(() => textarea && textarea.focus(), 50);
@@ -759,7 +766,7 @@ function ExperimentDetail() {
                           setQuickCreateType('reagent');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -769,7 +776,7 @@ function ExperimentDetail() {
                           setQuickCreateType('sample');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -793,7 +800,7 @@ function ExperimentDetail() {
                           setQuickCreateType('reagent');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -803,7 +810,7 @@ function ExperimentDetail() {
                           setQuickCreateType('sample');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -855,7 +862,7 @@ function ExperimentDetail() {
                           setQuickCreateType('reagent');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -865,7 +872,7 @@ function ExperimentDetail() {
                           setQuickCreateType('sample');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -889,7 +896,7 @@ function ExperimentDetail() {
                           setQuickCreateType('reagent');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -899,7 +906,7 @@ function ExperimentDetail() {
                           setQuickCreateType('sample');
                           setQuickCreateName(strainMentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
                           setShowQuickCreate(true);
@@ -967,7 +974,7 @@ function ExperimentDetail() {
                           setQuickCreateType('reagent');
                           setQuickCreateName(mentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
                           setShowQuickCreate(true);
@@ -977,7 +984,7 @@ function ExperimentDetail() {
                           setQuickCreateType('sample');
                           setQuickCreateName(mentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
                           setShowQuickCreate(true);
@@ -1001,7 +1008,7 @@ function ExperimentDetail() {
                           setQuickCreateType('reagent');
                           setQuickCreateName(mentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
                           setShowQuickCreate(true);
@@ -1011,7 +1018,7 @@ function ExperimentDetail() {
                           setQuickCreateType('sample');
                           setQuickCreateName(mentionSearch);
                           setQuickCreateExtra('');
-                          setQuickCreateCallback((type, item) => {
+                          setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
                           setShowQuickCreate(true);

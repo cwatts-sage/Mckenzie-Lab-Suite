@@ -176,22 +176,29 @@ function Notebook() {
 
   const insertMention = (type, item) => {
     const name = item.name;
-    const id = item.id;
+    const itemId = item.id;
 
     // Replace @search with the mention text
     const textarea = contentRef.current;
-    const cursorPos = textarea.selectionStart;
-    const textBeforeCursor = form.content.substring(0, cursorPos);
-    const textAfterCursor = form.content.substring(cursorPos);
+    const cursorPos = textarea ? textarea.selectionStart : (form.content || '').length;
+    const textBeforeCursor = (form.content || '').substring(0, cursorPos);
+    const textAfterCursor = (form.content || '').substring(cursorPos);
     const atMatch = textBeforeCursor.match(/@(\w*)$/);
 
     if (atMatch) {
       const newBefore = textBeforeCursor.substring(0, atMatch.index) + `@[${name}]`;
-      setForm({
-        ...form,
+      setForm(prev => ({
+        ...prev,
         content: newBefore + textAfterCursor,
-        linked_items: [...form.linked_items.filter(li => !(li.id === id && li.type === type)), { type, id, name }]
-      });
+        linked_items: [...prev.linked_items.filter(li => !(li.id === itemId && li.type === type)), { type, id: itemId, name }]
+      }));
+    } else {
+      // Fallback: append mention at end of content (used after quick-create when cursor is lost)
+      setForm(prev => ({
+        ...prev,
+        content: (prev.content || '') + `@[${name}] `,
+        linked_items: [...prev.linked_items.filter(li => !(li.id === itemId && li.type === type)), { type, id: itemId, name }]
+      }));
     }
 
     setMentionOpen(false);
