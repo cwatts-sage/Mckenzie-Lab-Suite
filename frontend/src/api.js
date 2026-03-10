@@ -106,4 +106,12 @@ export const sampleAPI = {
   getReferences: (id) => api.get(`/samples/${id}/references`),
 };
 
+// Notes
+export const notesAPI = {
+  getAll: () => api.get('/notes'),
+  create: (data) => api.post('/notes', data),
+  update: (id, data) => api.put(`/notes/${id}`, data),
+  delete: (id) => api.delete(`/notes/${id}`),
+};
+
 export default api;

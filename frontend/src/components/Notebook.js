@@ -3,6 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { notebookAPI, experimentAPI, reagentAPI, sampleAPI, storageAPI } from '../api';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
+const ENTRY_TYPE_COLORS = {
+  protocol: '#3498db',
+  observation: '#9b59b6',
+  result: '#27ae60',
+  note: '#95a5a6',
+};
+
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', desc: 'Steps followed' },
   { value: 'observation', label: '👁️ Observation', desc: 'What was seen/measured' },
@@ -32,7 +39,13 @@ function Notebook() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState('chronological'); // chronological | weekly
+
+  // Calendar + Scratch Pad panel
+  const [toolsPanelOpen, setToolsPanelOpen] = useState(false);
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [scratchPad, setScratchPad] = useState('');
+  const scratchPadTimer = useRef(null);
+  const [scratchSaving, setScratchSaving] = useState(false);
 
   // Form
   const emptyForm = { title: '', content: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'note', linked_items: [] };
@@ -317,7 +330,57 @@ function Notebook() {
     });
   };
 
-  // Group by date for weekly view
+  // Calendar helpers
+  const calYear = calendarDate.getFullYear();
+  const calMonth = calendarDate.getMonth();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
+
+  const getEntryDatesMap = useCallback(() => {
+    const map = {};
+    entries.forEach(e => {
+      if (e.entry_date) {
+        if (!map[e.entry_date]) map[e.entry_date] = new Set();
+        map[e.entry_date].add(e.entry_type);
+      }
+    });
+    return map;
+  }, [entries]);
+
+  const entryDatesMap = getEntryDatesMap();
+
+  const scrollToDate = (dateStr) => {
+    const el = document.getElementById(`date-group-${dateStr}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  // Scratch pad auto-save for filtered experiment
+  const handleScratchPadChange = (val) => {
+    setScratchPad(val);
+    if (scratchPadTimer.current) clearTimeout(scratchPadTimer.current);
+    scratchPadTimer.current = setTimeout(async () => {
+      if (!filterExperiment) return;
+      setScratchSaving(true);
+      try {
+        await experimentAPI.update(filterExperiment, { scratch_pad: val });
+      } catch (e) { /* silent fail */ }
+      setScratchSaving(false);
+    }, 1000);
+  };
+
+  // Load scratch pad when experiment filter changes
+  useEffect(() => {
+    if (filterExperiment) {
+      const exp = experiments.find(e => e.id === filterExperiment);
+      setScratchPad(exp ? (exp.scratch_pad || '') : '');
+    } else {
+      setScratchPad('');
+    }
+  }, [filterExperiment, experiments]);
+
+  // Group by date view
   const groupByDate = () => {
     const groups = {};
     entries.forEach(e => {
@@ -352,10 +415,94 @@ function Notebook() {
           </select>
           <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="From date" />
           <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} title="To date" />
-          <div style={{display:'flex', gap:4}}>
-            <button className={`btn btn-sm ${viewMode === 'chronological' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('chronological')}>📅 List</button>
-            <button className={`btn btn-sm ${viewMode === 'weekly' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('weekly')}>📆 By Date</button>
-          </div>
+        </div>
+
+        {/* Collapsible Calendar & Notes panel */}
+        <div style={{marginBottom:16}}>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={() => setToolsPanelOpen(!toolsPanelOpen)}
+            style={{width:'100%',textAlign:'left',padding:'10px 16px',fontSize:'0.9rem',fontWeight:500}}
+          >
+            {toolsPanelOpen ? '📅 Calendar & Notes ▲' : '📅 Calendar & Notes ▼'}
+          </button>
+          {toolsPanelOpen && (
+            <div style={{display:'flex',gap:20,marginTop:12,flexWrap:'wrap'}}>
+              {/* Mini Monthly Calendar */}
+              <div style={{width:280,minWidth:240,border:'1px solid #eee',borderRadius:12,padding:16,background:'#fafafa'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth - 1, 1))}>←</button>
+                  <strong style={{fontSize:'0.9rem'}}>
+                    {calendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                  </strong>
+                  <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth + 1, 1))}>→</button>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:2,textAlign:'center',fontSize:'0.75rem'}}>
+                  {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+                    <div key={d} style={{fontWeight:600,color:'#888',padding:4}}>{d}</div>
+                  ))}
+                  {Array.from({ length: firstDayOfWeek }).map((_, i) => <div key={`empty-${i}`} />)}
+                  {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const entryTypes = entryDatesMap[dateStr];
+                    const hasEntries = !!entryTypes;
+                    const isToday = dateStr === new Date().toISOString().split('T')[0];
+
+                    return (
+                      <div
+                        key={day}
+                        onClick={() => hasEntries && scrollToDate(dateStr)}
+                        style={{
+                          padding:4,
+                          borderRadius:6,
+                          cursor: hasEntries ? 'pointer' : 'default',
+                          background: isToday ? '#eef4fb' : 'transparent',
+                          fontWeight: isToday ? 700 : 400,
+                          position:'relative'
+                        }}
+                      >
+                        {day}
+                        {hasEntries && (
+                          <div style={{display:'flex',gap:1,justifyContent:'center',marginTop:1}}>
+                            {[...entryTypes].slice(0,3).map((t, j) => (
+                              <div key={j} style={{width:5,height:5,borderRadius:'50%',background:ENTRY_TYPE_COLORS[t] || '#95a5a6'}} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Scratch Pad */}
+              <div style={{flex:1,minWidth:240,border:'1px solid #eee',borderRadius:12,padding:16,background:'#fafafa'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                  <label style={{fontSize:'0.85rem',fontWeight:600,color:'#444'}}>📝 Scratch Pad</label>
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    {scratchSaving && <span style={{fontSize:'0.7rem',color:'#888'}}>Saving...</span>}
+                  </div>
+                </div>
+                {filterExperiment ? (
+                  <textarea
+                    value={scratchPad}
+                    onChange={(e) => handleScratchPadChange(e.target.value)}
+                    placeholder="Quick notes, ideas, to-dos for this experiment..."
+                    rows={6}
+                    style={{
+                      width:'100%',resize:'vertical',border:'1px solid #eee',borderRadius:8,
+                      padding:10,fontSize:'0.85rem',fontFamily:'inherit',lineHeight:1.5
+                    }}
+                  />
+                ) : (
+                  <div style={{color:'#999',fontSize:'0.85rem',padding:12,textAlign:'center',lineHeight:1.6}}>
+                    Select an experiment to see its scratch pad, or visit the <strong>Notes</strong> tab
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {entries.length === 0 ? (
@@ -363,10 +510,10 @@ function Notebook() {
             <div className="emoji">📓</div>
             <p>No notebook entries yet. Start recording your research!</p>
           </div>
-        ) : viewMode === 'weekly' ? (
+        ) : (
           // Grouped by date view
           groupByDate().map(([date, dateEntries]) => (
-            <div key={date} style={{marginBottom:20}}>
+            <div key={date} id={`date-group-${date}`} style={{marginBottom:20}}>
               <h3 style={{fontSize:'1rem', color:'#2c3e50', marginBottom:8, borderBottom:'1px solid #eee', paddingBottom:6}}>
                 📅 {date === 'No date' ? date : new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                 <span style={{color:'#999', fontWeight:400, marginLeft:8}}>({dateEntries.length})</span>
@@ -374,9 +521,6 @@ function Notebook() {
               {dateEntries.map(entry => renderEntryCard(entry))}
             </div>
           ))
-        ) : (
-          // Chronological list
-          entries.map(entry => renderEntryCard(entry))
         )}
       </div>
 
