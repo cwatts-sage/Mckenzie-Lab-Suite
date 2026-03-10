@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { reagentAPI, storageAPI, catalogAPI } from '../api';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 function Inventory() {
   const [reagents, setReagents] = useState([]);
@@ -16,6 +17,7 @@ function Inventory() {
   const [error, setError] = useState('');
   const [editingReagent, setEditingReagent] = useState(null);
   const [form, setForm] = useState(getEmptyForm());
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   function getEmptyForm() {
     return {
@@ -99,10 +101,10 @@ function Inventory() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this reagent?')) return;
+  const handleDelete = async () => {
     try {
-      await reagentAPI.delete(id);
+      await reagentAPI.delete(deleteTarget.id);
+      setDeleteTarget(null);
       fetchData();
     } catch (err) {
       alert('Failed to delete');
@@ -222,7 +224,7 @@ function Inventory() {
                         <button className="btn btn-sm btn-warning" onClick={() => toggleLowStock(r)} style={{marginRight:4}}>
                           {r.is_low_stock ? '✓ Stocked' : '⚠️ Low'}
                         </button>
-                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(r.id)}>🗑️</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(r)}>🗑️</button>
                       </td>
                     </tr>
                   );
@@ -382,6 +384,15 @@ function Inventory() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Delete Confirm */}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          itemName={`reagent "${deleteTarget.name}"`}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

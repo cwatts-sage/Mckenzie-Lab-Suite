@@ -35,6 +35,7 @@ function enrichSample(s, locsMap, unitsMap) {
     name: s.name,
     date_collected: s.dateCollected || null,
     experiment: s.experiment || null,
+    experiment_id: s.experimentId || null,
     organism_strain: s.organismStrain || null,
     storage_location_id: s.storageLocationId || null,
     quantity: s.quantity ?? null,
@@ -149,6 +150,7 @@ app.http('samplesCreate', {
         createdAt: now,
         updatedAt: now
       };
+      if (body.experiment_id) entity.experimentId = body.experiment_id;
 
       await table.createEntity(entity);
 
@@ -187,6 +189,7 @@ app.http('samplesUpdate', {
         name: 'name',
         date_collected: 'dateCollected',
         experiment: 'experiment',
+        experiment_id: 'experimentId',
         organism_strain: 'organismStrain',
         storage_location_id: 'storageLocationId',
         quantity: 'quantity',
@@ -239,6 +242,72 @@ app.http('samplesDelete', {
 
       await table.deleteEntity(decoded.id, id);
       return jsonResponse(200, { success: true });
+    } catch (e) {
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+});
+
+// GET /api/samples/{id}/references — returns notebook entries mentioning this sample + linked experiment info
+app.http('sampleReferences', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'samples/{id}/references',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+
+    try {
+      const sampleId = req.params.id;
+
+      // Verify sample exists and belongs to user
+      const samplesTable = await getTable('samples');
+      let sample;
+      try {
+        sample = await samplesTable.getEntity(decoded.id, sampleId);
+      } catch (e) {
+        return jsonResponse(404, { error: 'Sample not found' });
+      }
+
+      // Get linked experiment info if experiment_id exists
+      let experiment = null;
+      if (sample.experimentId) {
+        try {
+          const expTable = await getTable('experiments');
+          const exp = await expTable.getEntity(decoded.id, sample.experimentId);
+          experiment = {
+            id: exp.rowKey,
+            title: exp.title || '',
+            status: exp.status || 'active'
+          };
+        } catch (e) { /* experiment may have been deleted */ }
+      }
+
+      // Find notebook entries that mention this sample in their linked_items
+      const entriesTable = await getTable('notebookentries');
+      const mentioningEntries = [];
+      const entities = entriesTable.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
+      for await (const entity of entities) {
+        const linkedItems = entity.linkedItems ? JSON.parse(entity.linkedItems) : [];
+        const mentions = linkedItems.some(li => li.id === sampleId && li.type === 'sample');
+        if (mentions) {
+          mentioningEntries.push({
+            id: entity.rowKey,
+            experiment_id: entity.experimentId || null,
+            title: entity.title || '',
+            entry_date: entity.entryDate || '',
+            entry_type: entity.entryType || 'note',
+            created_at: entity.createdAt
+          });
+        }
+      }
+
+      mentioningEntries.sort((a, b) => (b.entry_date || '').localeCompare(a.entry_date || ''));
+
+      return jsonResponse(200, {
+        experiment,
+        notebook_entries: mentioningEntries
+      });
     } catch (e) {
       return jsonResponse(500, { error: e.message });
     }

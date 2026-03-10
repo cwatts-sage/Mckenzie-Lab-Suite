@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { notebookAPI, experimentAPI, reagentAPI, sampleAPI } from '../api';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', desc: 'Steps followed' },
@@ -21,6 +22,7 @@ function Notebook() {
   const [showHistory, setShowHistory] = useState(null);
   const [history, setHistory] = useState([]);
   const [expandedEntry, setExpandedEntry] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   // Filters
   const [searchParams, setSearchParams] = useSearchParams();
@@ -38,8 +40,18 @@ function Notebook() {
   // @-mention
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionSearch, setMentionSearch] = useState('');
-  const [mentionPos, setMentionPos] = useState({ top: 0, left: 0 });
   const contentRef = useRef(null);
+
+  // Quick-create
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
+  const [quickCreateType, setQuickCreateType] = useState('reagent');
+  const [quickCreateName, setQuickCreateName] = useState('');
+  const [quickCreateExtra, setQuickCreateExtra] = useState('');
+
+  // Hyperlink popover
+  const [showLinkPopover, setShowLinkPopover] = useState(false);
+  const [linkText, setLinkText] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -103,10 +115,10 @@ function Notebook() {
     }
   };
 
-  const handleDelete = async (entry) => {
-    if (!window.confirm('Delete this notebook entry?')) return;
+  const handleDelete = async () => {
     try {
-      await notebookAPI.delete(entry.id);
+      await notebookAPI.delete(deleteTarget.id);
+      setDeleteTarget(null);
       fetchData();
     } catch (err) {
       alert('Failed to delete');
@@ -135,15 +147,31 @@ function Notebook() {
     if (atMatch) {
       setMentionSearch(atMatch[1].toLowerCase());
       setMentionOpen(true);
-      // Position the dropdown near the textarea cursor
-      const textarea = contentRef.current;
-      if (textarea) {
-        const rect = textarea.getBoundingClientRect();
-        setMentionPos({ top: rect.bottom + 4, left: rect.left });
-      }
     } else {
       setMentionOpen(false);
     }
+  };
+
+  // Cmd+K handler
+  const handleContentKeyDown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      setLinkText('');
+      setLinkUrl('');
+      setShowLinkPopover(true);
+    }
+  };
+
+  const insertHyperlink = () => {
+    if (!linkText || !linkUrl) return;
+    const textarea = contentRef.current;
+    const cursorPos = textarea.selectionStart;
+    const before = form.content.substring(0, cursorPos);
+    const after = form.content.substring(cursorPos);
+    const linkMarkdown = `[${linkText}](${linkUrl})`;
+    setForm({ ...form, content: before + linkMarkdown + after });
+    setShowLinkPopover(false);
+    setTimeout(() => textarea && textarea.focus(), 50);
   };
 
   const insertMention = (type, item) => {
@@ -182,6 +210,30 @@ function Notebook() {
     return results;
   };
 
+  // Quick-create handler
+  const handleQuickCreate = async () => {
+    if (!quickCreateName.trim()) return;
+    try {
+      let created;
+      if (quickCreateType === 'reagent') {
+        const res = await reagentAPI.create({ name: quickCreateName, vendor: quickCreateExtra || undefined });
+        created = res.data;
+      } else {
+        const res = await sampleAPI.create({ name: quickCreateName, organism_strain: quickCreateExtra || undefined });
+        created = res.data;
+      }
+      const [reagentsRes, samplesRes] = await Promise.all([reagentAPI.getAll(), sampleAPI.getAll()]);
+      setReagents(reagentsRes.data);
+      setSamples(samplesRes.data);
+      insertMention(quickCreateType, created);
+      setShowQuickCreate(false);
+      setQuickCreateName('');
+      setQuickCreateExtra('');
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to create');
+    }
+  };
+
   const getExperimentName = (id) => {
     const exp = experiments.find(e => e.id === id);
     return exp ? exp.title : 'Unknown';
@@ -189,10 +241,10 @@ function Notebook() {
 
   const typeInfo = (t) => ENTRY_TYPES.find(et => et.value === t) || ENTRY_TYPES[3];
 
-  // Render content with @mentions highlighted
+  // Render content with @mentions and hyperlinks highlighted
   const renderContent = (content, linkedItems) => {
     if (!content) return null;
-    const parts = content.split(/(@\[[^\]]+\])/g);
+    const parts = content.split(/(@\[[^\]]+\]|\[[^\]]+\]\([^)]+\))/g);
     return parts.map((part, i) => {
       const mentionMatch = part.match(/^@\[(.+)\]$/);
       if (mentionMatch) {
@@ -206,6 +258,16 @@ function Notebook() {
           }} title={linked ? `${linked.type}: ${linked.name}` : name}>
             @{name}
           </span>
+        );
+      }
+      // Hyperlink
+      const linkMatch = part.match(/^\[(.+)\]\((.+)\)$/);
+      if (linkMatch) {
+        return (
+          <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+            style={{ color: '#3498db', textDecoration: 'underline' }}>
+            {linkMatch[1]}
+          </a>
         );
       }
       // Render newlines
@@ -283,7 +345,7 @@ function Notebook() {
 
       {/* Entry Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => { setShowModal(false); setMentionOpen(false); }}>
+        <div className="modal-overlay" onClick={() => { setShowModal(false); setMentionOpen(false); setShowLinkPopover(false); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:700}}>
             <h2>{editing ? 'Edit Entry' : 'New Notebook Entry'}</h2>
             <div className="form-row">
@@ -314,11 +376,12 @@ function Notebook() {
               </div>
             </div>
             <div className="form-group" style={{position:'relative'}}>
-              <label>Content <span style={{fontWeight:400, color:'#999', fontSize:'0.8rem'}}>— type @ to link a reagent or sample</span></label>
+              <label>Content <span style={{fontWeight:400, color:'#999', fontSize:'0.8rem'}}>— type @ to link items, ⌘K to insert link</span></label>
               <textarea
                 ref={contentRef}
                 value={form.content}
                 onChange={handleContentChange}
+                onKeyDown={handleContentKeyDown}
                 rows={10}
                 style={{resize:'vertical', fontFamily:'inherit', lineHeight:1.6}}
                 placeholder="Record your observations, protocol steps, results...&#10;&#10;Type @ to link a reagent or sample from your inventory."
@@ -331,16 +394,74 @@ function Notebook() {
                   boxShadow:'0 4px 12px rgba(0,0,0,0.1)', maxHeight:200, overflowY:'auto', zIndex:200
                 }}>
                   {getMentionResults().length === 0 ? (
-                    <div style={{padding:12, color:'#999', fontSize:'0.9rem'}}>No matches found</div>
-                  ) : getMentionResults().map((r, i) => (
-                    <div key={i} style={{padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f0f0', fontSize:'0.9rem'}}
-                      onClick={() => insertMention(r.type, r.item)}
-                      onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
-                      onMouseOut={(e) => e.currentTarget.style.background = 'white'}
-                    >
-                      {r.label}
+                    <div style={{padding:12}}>
+                      <div style={{color:'#999', fontSize:'0.9rem', marginBottom:8}}>No matches found</div>
+                      <div style={{display:'flex',gap:8}}>
+                        <button className="btn btn-sm btn-secondary" onClick={() => {
+                          setMentionOpen(false);
+                          setQuickCreateType('reagent');
+                          setQuickCreateName(mentionSearch);
+                          setQuickCreateExtra('');
+                          setShowQuickCreate(true);
+                        }}>+ New Reagent</button>
+                        <button className="btn btn-sm btn-secondary" onClick={() => {
+                          setMentionOpen(false);
+                          setQuickCreateType('sample');
+                          setQuickCreateName(mentionSearch);
+                          setQuickCreateExtra('');
+                          setShowQuickCreate(true);
+                        }}>+ New Sample</button>
+                      </div>
                     </div>
-                  ))}
+                  ) : (
+                    <>
+                      {getMentionResults().map((r, i) => (
+                        <div key={i} style={{padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f0f0', fontSize:'0.9rem'}}
+                          onClick={() => insertMention(r.type, r.item)}
+                          onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
+                          onMouseOut={(e) => e.currentTarget.style.background = 'white'}
+                        >
+                          {r.label}
+                        </div>
+                      ))}
+                      <div style={{padding:'8px 14px',borderTop:'1px solid #eee',display:'flex',gap:8}}>
+                        <button className="btn btn-sm btn-secondary" onClick={() => {
+                          setMentionOpen(false);
+                          setQuickCreateType('reagent');
+                          setQuickCreateName(mentionSearch);
+                          setQuickCreateExtra('');
+                          setShowQuickCreate(true);
+                        }}>+ New Reagent</button>
+                        <button className="btn btn-sm btn-secondary" onClick={() => {
+                          setMentionOpen(false);
+                          setQuickCreateType('sample');
+                          setQuickCreateName(mentionSearch);
+                          setQuickCreateExtra('');
+                          setShowQuickCreate(true);
+                        }}>+ New Sample</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {/* Link popover */}
+              {showLinkPopover && (
+                <div style={{
+                  position:'absolute',bottom:'calc(100% - 40px)',left:'50%',transform:'translateX(-50%)',
+                  background:'white',border:'1px solid #ddd',borderRadius:8,padding:16,
+                  boxShadow:'0 4px 12px rgba(0,0,0,0.15)',zIndex:300,width:300
+                }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{fontWeight:600,fontSize:'0.9rem',marginBottom:8}}>🔗 Insert Link</div>
+                  <div className="form-group" style={{marginBottom:8}}>
+                    <input value={linkText} onChange={(e) => setLinkText(e.target.value)} placeholder="Link text" style={{fontSize:'0.85rem',padding:8}} autoFocus />
+                  </div>
+                  <div className="form-group" style={{marginBottom:8}}>
+                    <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." style={{fontSize:'0.85rem',padding:8}} />
+                  </div>
+                  <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                    <button className="btn btn-sm btn-secondary" onClick={() => setShowLinkPopover(false)}>Cancel</button>
+                    <button className="btn btn-sm btn-primary" onClick={insertHyperlink} disabled={!linkText || !linkUrl}>Insert</button>
+                  </div>
                 </div>
               )}
             </div>
@@ -363,8 +484,30 @@ function Notebook() {
               </div>
             )}
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => { setShowModal(false); setMentionOpen(false); }}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => { setShowModal(false); setMentionOpen(false); setShowLinkPopover(false); }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSave}>{editing ? 'Save Changes' : 'Create Entry'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick-Create Modal */}
+      {showQuickCreate && (
+        <div className="modal-overlay" onClick={() => setShowQuickCreate(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:440}}>
+            <h2>Quick Create {quickCreateType === 'reagent' ? '📦 Reagent' : '🧫 Sample'}</h2>
+            <div className="form-group">
+              <label>Name *</label>
+              <input value={quickCreateName} onChange={(e) => setQuickCreateName(e.target.value)} autoFocus />
+            </div>
+            <div className="form-group">
+              <label>{quickCreateType === 'reagent' ? 'Vendor' : 'Organism/Strain'}</label>
+              <input value={quickCreateExtra} onChange={(e) => setQuickCreateExtra(e.target.value)}
+                placeholder={quickCreateType === 'reagent' ? 'e.g., Thermo Fisher' : 'e.g., C57BL/6J'} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowQuickCreate(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleQuickCreate}>Create & Add</button>
             </div>
           </div>
         </div>
@@ -402,6 +545,15 @@ function Notebook() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirm */}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          itemName={`notebook entry "${deleteTarget.title}"`}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 
@@ -432,7 +584,7 @@ function Notebook() {
           <div style={{display:'flex', gap:4}}>
             <button className="btn btn-sm btn-secondary" onClick={() => viewHistory(entry)} title="View history">📜</button>
             <button className="btn btn-sm btn-secondary" onClick={() => openEdit(entry)}>Edit</button>
-            <button className="btn btn-sm btn-danger" onClick={() => handleDelete(entry)}>🗑️</button>
+            <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(entry)}>🗑️</button>
           </div>
         </div>
 

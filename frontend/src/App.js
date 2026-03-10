@@ -12,6 +12,7 @@ import Settings from './components/Settings';
 import Admin from './components/Admin';
 import Notebook from './components/Notebook';
 import Experiments from './components/Experiments';
+import ExperimentDetail from './components/ExperimentDetail';
 import './App.css';
 
 function SubNav() {
@@ -34,7 +35,7 @@ function SubNav() {
     return (
       <div className="sub-nav">
         <NavLink to="/notebook" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📝 Entries</NavLink>
-        <NavLink to="/notebook/experiments" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🧪 Experiments</NavLink>
+        <NavLink to="/notebook/experiments" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🧪 Experiments</NavLink>
       </div>
     );
   }
@@ -56,23 +57,27 @@ function AppContent({ user, setUser, handleLogout }) {
         </div>
       </header>
       <nav className="app-nav">
-        <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-          🏠 Hub
-        </NavLink>
-        <NavLink to="/inventory" className={({ isActive }) => `nav-link ${isActive || location.pathname.startsWith('/inventory') ? 'active' : ''}`}>
-          📦 Inventory
-        </NavLink>
-        <NavLink to="/notebook" className={({ isActive }) => `nav-link ${isActive || location.pathname.startsWith('/notebook') ? 'active' : ''}`}>
-          📓 Notebook
-        </NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-          ⚙️
-        </NavLink>
-        {user.is_admin && (
-          <NavLink to="/admin" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            🔐
+        <div className="nav-left">
+          <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            🏠 Hub
           </NavLink>
-        )}
+          <NavLink to="/inventory" className={({ isActive }) => `nav-link ${isActive || location.pathname.startsWith('/inventory') ? 'active' : ''}`}>
+            📦 Inventory
+          </NavLink>
+          <NavLink to="/notebook" className={({ isActive }) => `nav-link ${isActive || location.pathname.startsWith('/notebook') ? 'active' : ''}`}>
+            📓 Notebook
+          </NavLink>
+        </div>
+        <div className="nav-right">
+          <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            ⚙️
+          </NavLink>
+          {user.is_admin && (
+            <NavLink to="/admin" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              🔐
+            </NavLink>
+          )}
+        </div>
       </nav>
       <SubNav />
       <main className="app-main">
@@ -86,6 +91,7 @@ function AppContent({ user, setUser, handleLogout }) {
           <Route path="/inventory/export" element={<Export />} />
           <Route path="/notebook" element={<Notebook />} />
           <Route path="/notebook/experiments" element={<Experiments />} />
+          <Route path="/notebook/experiments/:id" element={<ExperimentDetail />} />
           <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
           {user.is_admin && <Route path="/admin" element={<Admin />} />}
           <Route path="*" element={<Navigate to="/" replace />} />

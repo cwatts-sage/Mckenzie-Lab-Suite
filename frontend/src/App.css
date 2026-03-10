@@ -67,6 +67,16 @@ body {
   overflow-x: auto;
   overflow-y: visible;
   -webkit-overflow-scrolling: touch;
+  justify-content: space-between;
+}
+
+.nav-left {
+  display: flex;
+}
+
+.nav-right {
+  display: flex;
+  margin-left: auto;
 }
 
 .nav-link {

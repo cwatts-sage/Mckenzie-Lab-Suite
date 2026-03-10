@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { sampleAPI, storageAPI } from '../api';
+import { useNavigate } from 'react-router-dom';
+import { sampleAPI, storageAPI, experimentAPI } from '../api';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 function Samples() {
   const [samples, setSamples] = useState([]);
   const [storageUnits, setStorageUnits] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [experiments, setExperiments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -13,10 +16,21 @@ function Samples() {
   const [showModal, setShowModal] = useState(false);
   const [editingSample, setEditingSample] = useState(null);
   const [form, setForm] = useState(getEmptyForm());
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const navigate = useNavigate();
+
+  // Experiment dropdown state
+  const [expDropdownOpen, setExpDropdownOpen] = useState(false);
+  const [expSearch, setExpSearch] = useState('');
+
+  // Cross-reference expand
+  const [expandedSample, setExpandedSample] = useState(null);
+  const [sampleRefs, setSampleRefs] = useState(null);
+  const [loadingRefs, setLoadingRefs] = useState(false);
 
   function getEmptyForm() {
     return {
-      name: '', date_collected: '', experiment: '', organism_strain: '',
+      name: '', date_collected: '', experiment: '', experiment_id: null, organism_strain: '',
       storage_location_id: '', quantity: '', quantity_unit: '',
       notes: '', status: 'stored'
     };
@@ -29,14 +43,16 @@ function Samples() {
       if (filterUnit) params.unit_id = filterUnit;
       if (filterStatus) params.status = filterStatus;
 
-      const [samplesRes, unitsRes, locsRes] = await Promise.all([
+      const [samplesRes, unitsRes, locsRes, expsRes] = await Promise.all([
         sampleAPI.getAll(params),
         storageAPI.getUnits(),
         storageAPI.getLocations(),
+        experimentAPI.getAll(),
       ]);
       setSamples(samplesRes.data);
       setStorageUnits(unitsRes.data);
       setLocations(locsRes.data);
+      setExperiments(expsRes.data);
     } catch (err) {
       console.error('Failed to fetch data:', err);
       setError('Failed to load samples: ' + (err.response?.data?.error || err.message));
@@ -55,6 +71,8 @@ function Samples() {
       ...getEmptyForm(),
       date_collected: new Date().toISOString().split('T')[0]
     });
+    setExpSearch('');
+    setExpDropdownOpen(false);
     setShowModal(true);
   };
 
@@ -64,6 +82,7 @@ function Samples() {
       name: sample.name || '',
       date_collected: sample.date_collected || '',
       experiment: sample.experiment || '',
+      experiment_id: sample.experiment_id || null,
       organism_strain: sample.organism_strain || '',
       storage_location_id: sample.storage_location_id || '',
       quantity: sample.quantity ?? '',
@@ -71,6 +90,8 @@ function Samples() {
       notes: sample.notes || '',
       status: sample.status || 'stored',
     });
+    setExpSearch(sample.experiment || '');
+    setExpDropdownOpen(false);
     setShowModal(true);
   };
 
@@ -80,6 +101,7 @@ function Samples() {
         ...form,
         quantity: form.quantity !== '' ? parseFloat(form.quantity) : null,
         storage_location_id: form.storage_location_id || null,
+        experiment_id: form.experiment_id || null,
       };
 
       if (editingSample) {
@@ -94,14 +116,49 @@ function Samples() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this sample?')) return;
+  const handleDelete = async () => {
     try {
-      await sampleAPI.delete(id);
+      await sampleAPI.delete(deleteTarget.id);
+      setDeleteTarget(null);
       fetchData();
     } catch (err) {
       alert('Failed to delete');
     }
+  };
+
+  // Experiment combo box helpers
+  const handleExpSearchChange = (val) => {
+    setExpSearch(val);
+    setForm({ ...form, experiment: val, experiment_id: null });
+    setExpDropdownOpen(true);
+  };
+
+  const selectExperiment = (exp) => {
+    setForm({ ...form, experiment: exp.title, experiment_id: exp.id });
+    setExpSearch(exp.title);
+    setExpDropdownOpen(false);
+  };
+
+  const filteredExperiments = experiments.filter(e =>
+    !expSearch || (e.title || '').toLowerCase().includes(expSearch.toLowerCase())
+  );
+
+  // Cross-reference view
+  const toggleExpandSample = async (sample) => {
+    if (expandedSample === sample.id) {
+      setExpandedSample(null);
+      setSampleRefs(null);
+      return;
+    }
+    setExpandedSample(sample.id);
+    setLoadingRefs(true);
+    try {
+      const res = await sampleAPI.getReferences(sample.id);
+      setSampleRefs(res.data);
+    } catch (err) {
+      setSampleRefs({ experiment: null, notebook_entries: [] });
+    }
+    setLoadingRefs(false);
   };
 
   const formatLocation = (s) => {
@@ -177,25 +234,82 @@ function Samples() {
               <tbody>
                 {samples.map(s => {
                   const statusBadge = getStatusBadge(s.status);
+                  const isExpanded = expandedSample === s.id;
                   return (
-                    <tr key={s.id}>
-                      <td>
-                        <strong>{s.name}</strong>
-                        {s.notes && (
-                          <div style={{fontSize:'0.8rem', color:'#888', marginTop:2}}>{s.notes.substring(0, 50)}{s.notes.length > 50 ? '...' : ''}</div>
-                        )}
-                      </td>
-                      <td>{s.date_collected || '—'}</td>
-                      <td>{s.experiment || '—'}</td>
-                      <td>{s.organism_strain || '—'}</td>
-                      <td style={{fontSize:'0.85rem'}}>{formatLocation(s)}</td>
-                      <td>{s.quantity != null ? `${s.quantity} ${s.quantity_unit || ''}` : '—'}</td>
-                      <td><span className={`badge ${statusBadge.class}`}>{statusBadge.text}</span></td>
-                      <td>
-                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(s)} style={{marginRight:4}}>Edit</button>
-                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(s.id)}>🗑️</button>
-                      </td>
-                    </tr>
+                    <React.Fragment key={s.id}>
+                      <tr style={{cursor:'pointer'}} onClick={() => toggleExpandSample(s)}>
+                        <td>
+                          <strong>{s.name}</strong>
+                          {s.notes && (
+                            <div style={{fontSize:'0.8rem', color:'#888', marginTop:2}}>{s.notes.substring(0, 50)}{s.notes.length > 50 ? '...' : ''}</div>
+                          )}
+                        </td>
+                        <td>{s.date_collected || '—'}</td>
+                        <td>
+                          {s.experiment_id ? (
+                            <span style={{color:'#3498db',cursor:'pointer',textDecoration:'underline'}}
+                              onClick={(e) => { e.stopPropagation(); navigate(`/notebook/experiments/${s.experiment_id}`); }}>
+                              {s.experiment || 'View'}
+                            </span>
+                          ) : (s.experiment || '—')}
+                        </td>
+                        <td>{s.organism_strain || '—'}</td>
+                        <td style={{fontSize:'0.85rem'}}>{formatLocation(s)}</td>
+                        <td>{s.quantity != null ? `${s.quantity} ${s.quantity_unit || ''}` : '—'}</td>
+                        <td><span className={`badge ${statusBadge.class}`}>{statusBadge.text}</span></td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button className="btn btn-sm btn-secondary" onClick={() => openEdit(s)} style={{marginRight:4}}>Edit</button>
+                          <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(s)}>🗑️</button>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={8} style={{background:'#f8f9fa',padding:16}}>
+                            {loadingRefs ? (
+                              <div style={{color:'#888',fontSize:'0.9rem'}}>Loading references...</div>
+                            ) : sampleRefs ? (
+                              <div>
+                                {sampleRefs.experiment && (
+                                  <div style={{marginBottom:12}}>
+                                    <label style={{fontSize:'0.8rem',color:'#888',fontWeight:600,textTransform:'uppercase'}}>Linked Experiment</label>
+                                    <div style={{marginTop:4}}>
+                                      <span style={{color:'#3498db',cursor:'pointer',textDecoration:'underline',fontWeight:500}}
+                                        onClick={() => navigate(`/notebook/experiments/${sampleRefs.experiment.id}`)}>
+                                        🧪 {sampleRefs.experiment.title}
+                                      </span>
+                                      <span className={`badge badge-${sampleRefs.experiment.status === 'active' ? 'success' : 'info'}`} style={{marginLeft:8}}>
+                                        {sampleRefs.experiment.status}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                                <div>
+                                  <label style={{fontSize:'0.8rem',color:'#888',fontWeight:600,textTransform:'uppercase'}}>Notebook Mentions ({sampleRefs.notebook_entries.length})</label>
+                                  {sampleRefs.notebook_entries.length === 0 ? (
+                                    <div style={{color:'#999',fontSize:'0.85rem',marginTop:4}}>No notebook entries mention this sample.</div>
+                                  ) : (
+                                    <div style={{marginTop:4,display:'flex',flexDirection:'column',gap:6}}>
+                                      {sampleRefs.notebook_entries.map(ne => (
+                                        <div key={ne.id} style={{
+                                          padding:'8px 12px',background:'white',borderRadius:8,
+                                          border:'1px solid #eee',cursor:'pointer',fontSize:'0.85rem'
+                                        }}
+                                          onClick={() => ne.experiment_id && navigate(`/notebook/experiments/${ne.experiment_id}`)}
+                                        >
+                                          <span style={{fontWeight:500}}>{ne.title}</span>
+                                          <span style={{color:'#888',marginLeft:8}}>📅 {ne.entry_date}</span>
+                                          <span className="badge badge-info" style={{marginLeft:8,fontSize:'0.7rem'}}>{ne.entry_type}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -206,7 +320,7 @@ function Samples() {
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay" onClick={() => { setShowModal(false); setExpDropdownOpen(false); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>{editingSample ? 'Edit Sample' : 'Add Sample'}</h2>
 
@@ -230,9 +344,45 @@ function Samples() {
               </div>
             </div>
 
-            <div className="form-group">
+            {/* Experiment combo box */}
+            <div className="form-group" style={{position:'relative'}}>
               <label>Experiment</label>
-              <input value={form.experiment} onChange={(e) => setForm({...form, experiment: e.target.value})} placeholder="e.g., TBI Study Cohort 3" />
+              <input
+                value={expSearch}
+                onChange={(e) => handleExpSearchChange(e.target.value)}
+                onFocus={() => setExpDropdownOpen(true)}
+                placeholder="Search experiments or type custom..."
+              />
+              {form.experiment_id && (
+                <div style={{fontSize:'0.8rem',color:'#27ae60',marginTop:4}}>
+                  ✓ Linked to experiment
+                  <span style={{cursor:'pointer',color:'#e74c3c',marginLeft:8}} onClick={() => {
+                    setForm({...form, experiment_id: null});
+                  }}>× Unlink</span>
+                </div>
+              )}
+              {expDropdownOpen && (
+                <div style={{
+                  position:'absolute',left:0,right:0,top:'100%',
+                  background:'white',border:'1px solid #ddd',borderRadius:8,
+                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)',maxHeight:200,overflowY:'auto',zIndex:200
+                }}>
+                  {filteredExperiments.length === 0 ? (
+                    <div style={{padding:12,color:'#999',fontSize:'0.9rem'}}>No matching experiments</div>
+                  ) : (
+                    filteredExperiments.map(exp => (
+                      <div key={exp.id} style={{padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',fontSize:'0.9rem'}}
+                        onClick={() => selectExperiment(exp)}
+                        onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'white'}
+                      >
+                        🧪 {exp.title}
+                        <span className={`badge badge-${exp.status === 'active' ? 'success' : 'info'}`} style={{marginLeft:8,fontSize:'0.7rem'}}>{exp.status}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -275,13 +425,22 @@ function Samples() {
             </div>
 
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => { setShowModal(false); setExpDropdownOpen(false); }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSave}>
                 {editingSample ? 'Save Changes' : 'Add Sample'}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Delete Confirm */}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          itemName={`sample "${deleteTarget.name}"`}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

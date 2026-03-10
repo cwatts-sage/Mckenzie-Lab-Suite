@@ -69,6 +69,7 @@ export const adminAPI = {
 // Experiments
 export const experimentAPI = {
   getAll: () => api.get('/experiments'),
+  getOne: (id) => api.get(`/experiments/${id}`),
   create: (data) => api.post('/experiments', data),
   update: (id, data) => api.put(`/experiments/${id}`, data),
   delete: (id) => api.delete(`/experiments/${id}`),
@@ -102,6 +103,7 @@ export const sampleAPI = {
   create: (data) => api.post('/samples', data),
   update: (id, data) => api.put(`/samples/${id}`, data),
   delete: (id) => api.delete(`/samples/${id}`),
+  getReferences: (id) => api.get(`/samples/${id}/references`),
 };
 
 export default api;
