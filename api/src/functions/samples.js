@@ -226,6 +226,49 @@ app.http('samplesUpdate', {
   }
 });
 
+// PUT /api/samples/batch-status — batch update status for multiple samples
+app.http('samplesBatchStatus', {
+  methods: ['PUT'],
+  authLevel: 'anonymous',
+  route: 'samples/batch-status',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+
+    try {
+      const body = await req.json();
+      const { sample_ids, status } = body;
+
+      if (!sample_ids || !Array.isArray(sample_ids) || sample_ids.length === 0) {
+        return jsonResponse(400, { error: 'sample_ids array is required' });
+      }
+      if (!status) {
+        return jsonResponse(400, { error: 'status is required' });
+      }
+
+      const table = await getTable('samples');
+      const now = new Date().toISOString();
+      const updated = [];
+
+      for (const sampleId of sample_ids) {
+        try {
+          const entity = await table.getEntity(decoded.id, sampleId);
+          entity.status = status;
+          entity.updatedAt = now;
+          await table.updateEntity(entity, 'Merge');
+          updated.push(sampleId);
+        } catch (e) {
+          // Skip samples that don't exist or don't belong to user
+        }
+      }
+
+      return jsonResponse(200, { updated, count: updated.length });
+    } catch (e) {
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+});
+
 // DELETE /api/samples/{id}
 app.http('samplesDelete', {
   methods: ['DELETE'],

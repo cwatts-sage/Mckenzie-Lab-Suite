@@ -38,6 +38,13 @@ function Notebook() {
   // Form
   const emptyForm = { title: '', content: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'note', linked_items: [] };
   const [form, setForm] = useState(emptyForm);
+  const [originalLinkedItems, setOriginalLinkedItems] = useState([]);
+
+  // Status update prompt
+  const [showStatusPrompt, setShowStatusPrompt] = useState(false);
+  const [newlyLinkedSamples, setNewlyLinkedSamples] = useState([]);
+  const [selectedForStatusUpdate, setSelectedForStatusUpdate] = useState(new Set());
+  const [statusPromptMode, setStatusPromptMode] = useState('ask'); // 'ask' or 'custom'
 
   // @-mention
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -86,18 +93,21 @@ function Notebook() {
 
   const openAdd = () => {
     setForm({ ...emptyForm, experiment_id: filterExperiment || '', entry_date: new Date().toISOString().split('T')[0] });
+    setOriginalLinkedItems([]);
     setEditing(null);
     setShowModal(true);
   };
 
   const openEdit = (entry) => {
+    const items = entry.linked_items || [];
     setForm({
       title: entry.title, content: entry.content,
       experiment_id: entry.experiment_id || '',
       entry_date: entry.entry_date,
       entry_type: entry.entry_type,
-      linked_items: entry.linked_items || []
+      linked_items: items
     });
+    setOriginalLinkedItems(items);
     setEditing(entry);
     setShowModal(true);
   };
@@ -111,11 +121,56 @@ function Notebook() {
         await notebookAPI.create(form);
       }
       setShowModal(false);
-      setLoading(true);
-      fetchData();
+
+      // Check for newly linked samples that aren't already "in use"
+      const originalIds = new Set(originalLinkedItems.filter(li => li.type === 'sample').map(li => li.id));
+      const newSamples = form.linked_items
+        .filter(li => li.type === 'sample' && !originalIds.has(li.id))
+        .map(li => {
+          const sampleData = samples.find(s => s.id === li.id);
+          return { ...li, status: sampleData?.status || 'stored' };
+        })
+        .filter(li => li.status !== 'in use' && li.status !== 'depleted');
+
+      if (newSamples.length > 0) {
+        setNewlyLinkedSamples(newSamples);
+        setSelectedForStatusUpdate(new Set(newSamples.map(s => s.id)));
+        setStatusPromptMode('ask');
+        setShowStatusPrompt(true);
+      } else {
+        setLoading(true);
+        fetchData();
+      }
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to save');
     }
+  };
+
+  const handleStatusUpdate = async (action) => {
+    if (action === 'yes') {
+      // Update all newly linked samples to "in use"
+      const ids = newlyLinkedSamples.map(s => s.id);
+      try {
+        await sampleAPI.batchUpdateStatus(ids, 'in use');
+      } catch (err) {
+        alert('Failed to update sample statuses');
+      }
+    } else if (action === 'custom') {
+      // Update only selected ones
+      const ids = [...selectedForStatusUpdate];
+      if (ids.length > 0) {
+        try {
+          await sampleAPI.batchUpdateStatus(ids, 'in use');
+        } catch (err) {
+          alert('Failed to update sample statuses');
+        }
+      }
+    }
+    // action === 'no' does nothing
+    setShowStatusPrompt(false);
+    setNewlyLinkedSamples([]);
+    setLoading(true);
+    fetchData();
   };
 
   const handleDelete = async () => {
@@ -664,6 +719,68 @@ function Notebook() {
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
         />
+      )}
+
+      {/* Status Update Prompt */}
+      {showStatusPrompt && (
+        <div className="modal-overlay" onClick={() => handleStatusUpdate('no')}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:480}}>
+            <h2>🧫 Update Sample Status?</h2>
+            <p style={{color:'#555',marginBottom:16}}>
+              {newlyLinkedSamples.length === 1
+                ? 'You linked a new sample to this entry. Change its status to "In Use"?'
+                : `You linked ${newlyLinkedSamples.length} new samples to this entry. Change their status to "In Use"?`}
+            </p>
+
+            {statusPromptMode === 'ask' ? (
+              <>
+                <div style={{marginBottom:16}}>
+                  {newlyLinkedSamples.map(s => (
+                    <div key={s.id} style={{padding:'6px 0',fontSize:'0.9rem',display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{background:'#d5f5e3',padding:'2px 8px',borderRadius:10,fontSize:'0.8rem'}}>🧫 {s.name}</span>
+                      <span style={{color:'#888',fontSize:'0.8rem'}}>({s.status})</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="modal-actions" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <button className="btn btn-secondary" onClick={() => handleStatusUpdate('no')}>No</button>
+                  {newlyLinkedSamples.length > 1 && (
+                    <button className="btn btn-secondary" onClick={() => setStatusPromptMode('custom')}>Custom</button>
+                  )}
+                  <button className="btn btn-primary" onClick={() => handleStatusUpdate('yes')}>
+                    Yes{newlyLinkedSamples.length > 1 ? ', all' : ''}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{marginBottom:16}}>
+                  {newlyLinkedSamples.map(s => (
+                    <label key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',cursor:'pointer',fontSize:'0.9rem'}}>
+                      <input
+                        type="checkbox"
+                        checked={selectedForStatusUpdate.has(s.id)}
+                        onChange={(e) => {
+                          const next = new Set(selectedForStatusUpdate);
+                          if (e.target.checked) next.add(s.id); else next.delete(s.id);
+                          setSelectedForStatusUpdate(next);
+                        }}
+                      />
+                      <span style={{background:'#d5f5e3',padding:'2px 8px',borderRadius:10,fontSize:'0.8rem'}}>🧫 {s.name}</span>
+                      <span style={{color:'#888',fontSize:'0.8rem'}}>({s.status})</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setStatusPromptMode('ask')}>Back</button>
+                  <button className="btn btn-primary" onClick={() => handleStatusUpdate('custom')} disabled={selectedForStatusUpdate.size === 0}>
+                    Update Selected ({selectedForStatusUpdate.size})
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

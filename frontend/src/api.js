@@ -104,6 +104,7 @@ export const sampleAPI = {
   update: (id, data) => api.put(`/samples/${id}`, data),
   delete: (id) => api.delete(`/samples/${id}`),
   getReferences: (id) => api.get(`/samples/${id}/references`),
+  batchUpdateStatus: (sampleIds, status) => api.put('/samples/batch-status', { sample_ids: sampleIds, status }),
 };
 
 // Notes
