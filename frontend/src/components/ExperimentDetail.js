@@ -1010,9 +1010,9 @@ function ExperimentDetail() {
               {/* @-mention dropdown */}
               {mentionOpen && (
                 <div style={{
-                  position:'absolute',bottom:'calc(100% - 40px)',left:0,right:0,
+                  position:'absolute',top:'100%',left:0,right:0,marginTop:4,
                   background:'white',border:'1px solid #ddd',borderRadius:8,
-                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)',maxHeight:320,overflowY:'auto',zIndex:200
+                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)',maxHeight:280,overflowY:'auto',zIndex:200
                 }}>
                   {getMentionResults().filter(r => r.type !== 'header').length === 0 ? (
                     <div style={{padding:12}}>
