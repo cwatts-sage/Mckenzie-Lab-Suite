@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { experimentAPI, notebookAPI, reagentAPI, sampleAPI } from '../api';
+import { experimentAPI, notebookAPI, reagentAPI, sampleAPI, storageAPI } from '../api';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
 const STATUS_OPTIONS = [
@@ -25,6 +25,7 @@ function ExperimentDetail() {
   const [entries, setEntries] = useState([]);
   const [reagents, setReagents] = useState([]);
   const [samples, setSamples] = useState([]);
+  const [storageLocations, setStorageLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -56,8 +57,7 @@ function ExperimentDetail() {
   // Quick-create modal
   const [showQuickCreate, setShowQuickCreate] = useState(false);
   const [quickCreateType, setQuickCreateType] = useState('reagent');
-  const [quickCreateName, setQuickCreateName] = useState('');
-  const [quickCreateExtra, setQuickCreateExtra] = useState('');
+  const [quickCreateForm, setQuickCreateForm] = useState({ name: '', extra: '', date_collected: '', experiment_id: '', experiment_name: '', storage_location_id: '', quantity: '', quantity_unit: '' });
   const [quickCreateCallback, setQuickCreateCallback] = useState(null);
 
   // Calendar
@@ -77,16 +77,18 @@ function ExperimentDetail() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [expRes, entriesRes, reagentsRes, samplesRes] = await Promise.all([
+      const [expRes, entriesRes, reagentsRes, samplesRes, locsRes] = await Promise.all([
         experimentAPI.getOne(id),
         notebookAPI.getAll({ experiment_id: id }),
         reagentAPI.getAll(),
         sampleAPI.getAll(),
+        storageAPI.getLocations(),
       ]);
       setExperiment(expRes.data);
       setEntries(entriesRes.data);
       setReagents(reagentsRes.data);
       setSamples(samplesRes.data);
+      setStorageLocations(locsRes.data);
       setScratchPad(expRes.data.scratch_pad || '');
 
       // Set initially collapsed dates (all except most recent 3)
@@ -301,14 +303,23 @@ function ExperimentDetail() {
 
   // Quick-create for @-mention
   const handleQuickCreate = async () => {
-    if (!quickCreateName.trim()) return;
+    if (!quickCreateForm.name.trim()) return;
     try {
       let created;
       if (quickCreateType === 'reagent') {
-        const res = await reagentAPI.create({ name: quickCreateName, vendor: quickCreateExtra || undefined });
+        const res = await reagentAPI.create({ name: quickCreateForm.name, vendor: quickCreateForm.extra || undefined });
         created = res.data;
       } else {
-        const res = await sampleAPI.create({ name: quickCreateName, organism_strain: quickCreateExtra || undefined });
+        const sampleData = { name: quickCreateForm.name, organism_strain: quickCreateForm.extra || undefined };
+        if (quickCreateForm.date_collected) sampleData.date_collected = quickCreateForm.date_collected;
+        if (quickCreateForm.experiment_id) {
+          sampleData.experiment_id = quickCreateForm.experiment_id;
+          sampleData.experiment = quickCreateForm.experiment_name || '';
+        }
+        if (quickCreateForm.storage_location_id) sampleData.storage_location_id = quickCreateForm.storage_location_id;
+        if (quickCreateForm.quantity !== '') sampleData.quantity = parseFloat(quickCreateForm.quantity);
+        if (quickCreateForm.quantity_unit) sampleData.quantity_unit = quickCreateForm.quantity_unit;
+        const res = await sampleAPI.create(sampleData);
         created = res.data;
       }
       // Refresh lists
@@ -321,8 +332,7 @@ function ExperimentDetail() {
         quickCreateCallback(quickCreateType, created);
       }
       setShowQuickCreate(false);
-      setQuickCreateName('');
-      setQuickCreateExtra('');
+      setQuickCreateForm({ name: '', extra: '', date_collected: '', experiment_id: '', experiment_name: '', storage_location_id: '', quantity: '', quantity_unit: '' });
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to create');
     }
@@ -764,8 +774,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -774,8 +783,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -798,8 +806,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -808,8 +815,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -860,8 +866,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -870,8 +875,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -894,8 +898,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -904,8 +907,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setStrainMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(strainMentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: strainMentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             addStrainOrControl(type, item);
                           });
@@ -972,8 +974,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
@@ -982,8 +983,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
@@ -1006,8 +1006,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
@@ -1016,8 +1015,7 @@ function ExperimentDetail() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: id, experiment_name: experiment?.title || '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setQuickCreateCallback(() => (type, item) => {
                             insertMention(type, item);
                           });
@@ -1078,17 +1076,59 @@ function ExperimentDetail() {
       {/* Quick-Create Modal */}
       {showQuickCreate && (
         <div className="modal-overlay" onClick={() => setShowQuickCreate(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:440}}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:500}}>
             <h2>Quick Create {quickCreateType === 'reagent' ? '📦 Reagent' : '🧫 Sample'}</h2>
             <div className="form-group">
               <label>Name *</label>
-              <input value={quickCreateName} onChange={(e) => setQuickCreateName(e.target.value)} autoFocus />
+              <input value={quickCreateForm.name} onChange={(e) => setQuickCreateForm({...quickCreateForm, name: e.target.value})} autoFocus />
             </div>
             <div className="form-group">
               <label>{quickCreateType === 'reagent' ? 'Vendor' : 'Organism/Strain'}</label>
-              <input value={quickCreateExtra} onChange={(e) => setQuickCreateExtra(e.target.value)}
+              <input value={quickCreateForm.extra} onChange={(e) => setQuickCreateForm({...quickCreateForm, extra: e.target.value})}
                 placeholder={quickCreateType === 'reagent' ? 'e.g., Thermo Fisher' : 'e.g., C57BL/6J'} />
             </div>
+            {quickCreateType === 'sample' && (
+              <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Date Collected</label>
+                    <input type="date" value={quickCreateForm.date_collected} onChange={(e) => setQuickCreateForm({...quickCreateForm, date_collected: e.target.value})} />
+                  </div>
+                  <div className="form-group">
+                    <label>Experiment</label>
+                    <select value={quickCreateForm.experiment_id} onChange={(e) => {
+                      const expId = e.target.value;
+                      const expName = expId ? (experiment && experiment.id === expId ? experiment.title : expId) : '';
+                      setQuickCreateForm({...quickCreateForm, experiment_id: expId, experiment_name: expName});
+                    }}>
+                      <option value="">— None —</option>
+                      {experiment && <option value={experiment.id}>{experiment.title}</option>}
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Storage Location</label>
+                  <select value={quickCreateForm.storage_location_id} onChange={(e) => setQuickCreateForm({...quickCreateForm, storage_location_id: e.target.value})}>
+                    <option value="">— None —</option>
+                    {storageLocations.map(l => (
+                      <option key={l.id} value={l.id}>
+                        {l.unit_name || ''}{l.rack ? ` → Rack ${l.rack}` : ''}{l.box ? ` → Box ${l.box}` : ''}{l.position ? ` → Pos ${l.position}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Quantity</label>
+                    <input type="number" step="any" value={quickCreateForm.quantity} onChange={(e) => setQuickCreateForm({...quickCreateForm, quantity: e.target.value})} placeholder="e.g., 10" />
+                  </div>
+                  <div className="form-group">
+                    <label>Unit</label>
+                    <input value={quickCreateForm.quantity_unit} onChange={(e) => setQuickCreateForm({...quickCreateForm, quantity_unit: e.target.value})} placeholder="e.g., µL, vials" />
+                  </div>
+                </div>
+              </>
+            )}
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowQuickCreate(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleQuickCreate}>Create & Add</button>

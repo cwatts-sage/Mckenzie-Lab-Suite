@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { notebookAPI, experimentAPI, reagentAPI, sampleAPI } from '../api';
+import { notebookAPI, experimentAPI, reagentAPI, sampleAPI, storageAPI } from '../api';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
 const ENTRY_TYPES = [
@@ -15,6 +15,7 @@ function Notebook() {
   const [experiments, setExperiments] = useState([]);
   const [reagents, setReagents] = useState([]);
   const [samples, setSamples] = useState([]);
+  const [storageLocations, setStorageLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -45,8 +46,7 @@ function Notebook() {
   // Quick-create
   const [showQuickCreate, setShowQuickCreate] = useState(false);
   const [quickCreateType, setQuickCreateType] = useState('reagent');
-  const [quickCreateName, setQuickCreateName] = useState('');
-  const [quickCreateExtra, setQuickCreateExtra] = useState('');
+  const [quickCreateForm, setQuickCreateForm] = useState({ name: '', extra: '', date_collected: '', experiment_id: '', storage_location_id: '', quantity: '', quantity_unit: '' });
 
   // Hyperlink popover
   const [showLinkPopover, setShowLinkPopover] = useState(false);
@@ -62,16 +62,18 @@ function Notebook() {
       if (filterDateTo) params.date_to = filterDateTo;
       if (search) params.search = search;
 
-      const [entriesRes, expRes, reagentsRes, samplesRes] = await Promise.all([
+      const [entriesRes, expRes, reagentsRes, samplesRes, locsRes] = await Promise.all([
         notebookAPI.getAll(params),
         experimentAPI.getAll(),
         reagentAPI.getAll(),
         sampleAPI.getAll(),
+        storageAPI.getLocations(),
       ]);
       setEntries(entriesRes.data);
       setExperiments(expRes.data);
       setReagents(reagentsRes.data);
       setSamples(samplesRes.data);
+      setStorageLocations(locsRes.data);
     } catch (err) {
       setError('Failed to load notebook: ' + (err.response?.data?.error || err.message));
     } finally {
@@ -219,14 +221,23 @@ function Notebook() {
 
   // Quick-create handler
   const handleQuickCreate = async () => {
-    if (!quickCreateName.trim()) return;
+    if (!quickCreateForm.name.trim()) return;
     try {
       let created;
       if (quickCreateType === 'reagent') {
-        const res = await reagentAPI.create({ name: quickCreateName, vendor: quickCreateExtra || undefined });
+        const res = await reagentAPI.create({ name: quickCreateForm.name, vendor: quickCreateForm.extra || undefined });
         created = res.data;
       } else {
-        const res = await sampleAPI.create({ name: quickCreateName, organism_strain: quickCreateExtra || undefined });
+        const sampleData = { name: quickCreateForm.name, organism_strain: quickCreateForm.extra || undefined };
+        if (quickCreateForm.date_collected) sampleData.date_collected = quickCreateForm.date_collected;
+        if (quickCreateForm.experiment_id) {
+          sampleData.experiment_id = quickCreateForm.experiment_id;
+          sampleData.experiment = quickCreateForm.experiment_name || '';
+        }
+        if (quickCreateForm.storage_location_id) sampleData.storage_location_id = quickCreateForm.storage_location_id;
+        if (quickCreateForm.quantity !== '') sampleData.quantity = parseFloat(quickCreateForm.quantity);
+        if (quickCreateForm.quantity_unit) sampleData.quantity_unit = quickCreateForm.quantity_unit;
+        const res = await sampleAPI.create(sampleData);
         created = res.data;
       }
       const [reagentsRes, samplesRes] = await Promise.all([reagentAPI.getAll(), sampleAPI.getAll()]);
@@ -234,8 +245,7 @@ function Notebook() {
       setSamples(samplesRes.data);
       insertMention(quickCreateType, created);
       setShowQuickCreate(false);
-      setQuickCreateName('');
-      setQuickCreateExtra('');
+      setQuickCreateForm({ name: '', extra: '', date_collected: '', experiment_id: '', storage_location_id: '', quantity: '', quantity_unit: '' });
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to create');
     }
@@ -407,15 +417,15 @@ function Notebook() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: '', experiment_id: '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setShowQuickCreate(true);
                         }}>+ New Reagent</button>
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          const expId = form.experiment_id || '';
+                          const expName = expId ? (experiments.find(e => e.id === expId)?.title || '') : '';
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: expId, experiment_name: expName, storage_location_id: '', quantity: '', quantity_unit: '' });
                           setShowQuickCreate(true);
                         }}>+ New Sample</button>
                       </div>
@@ -435,15 +445,15 @@ function Notebook() {
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('reagent');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: '', experiment_id: '', storage_location_id: '', quantity: '', quantity_unit: '' });
                           setShowQuickCreate(true);
                         }}>+ New Reagent</button>
                         <button className="btn btn-sm btn-secondary" onClick={() => {
                           setMentionOpen(false);
                           setQuickCreateType('sample');
-                          setQuickCreateName(mentionSearch);
-                          setQuickCreateExtra('');
+                          const expId = form.experiment_id || '';
+                          const expName = expId ? (experiments.find(e => e.id === expId)?.title || '') : '';
+                          setQuickCreateForm({ name: mentionSearch, extra: '', date_collected: new Date().toISOString().split('T')[0], experiment_id: expId, experiment_name: expName, storage_location_id: '', quantity: '', quantity_unit: '' });
                           setShowQuickCreate(true);
                         }}>+ New Sample</button>
                       </div>
@@ -501,17 +511,59 @@ function Notebook() {
       {/* Quick-Create Modal */}
       {showQuickCreate && (
         <div className="modal-overlay" onClick={() => setShowQuickCreate(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:440}}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:500}}>
             <h2>Quick Create {quickCreateType === 'reagent' ? '📦 Reagent' : '🧫 Sample'}</h2>
             <div className="form-group">
               <label>Name *</label>
-              <input value={quickCreateName} onChange={(e) => setQuickCreateName(e.target.value)} autoFocus />
+              <input value={quickCreateForm.name} onChange={(e) => setQuickCreateForm({...quickCreateForm, name: e.target.value})} autoFocus />
             </div>
             <div className="form-group">
               <label>{quickCreateType === 'reagent' ? 'Vendor' : 'Organism/Strain'}</label>
-              <input value={quickCreateExtra} onChange={(e) => setQuickCreateExtra(e.target.value)}
+              <input value={quickCreateForm.extra} onChange={(e) => setQuickCreateForm({...quickCreateForm, extra: e.target.value})}
                 placeholder={quickCreateType === 'reagent' ? 'e.g., Thermo Fisher' : 'e.g., C57BL/6J'} />
             </div>
+            {quickCreateType === 'sample' && (
+              <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Date Collected</label>
+                    <input type="date" value={quickCreateForm.date_collected} onChange={(e) => setQuickCreateForm({...quickCreateForm, date_collected: e.target.value})} />
+                  </div>
+                  <div className="form-group">
+                    <label>Experiment</label>
+                    <select value={quickCreateForm.experiment_id} onChange={(e) => {
+                      const expId = e.target.value;
+                      const expName = expId ? (experiments.find(ex => ex.id === expId)?.title || '') : '';
+                      setQuickCreateForm({...quickCreateForm, experiment_id: expId, experiment_name: expName});
+                    }}>
+                      <option value="">— None —</option>
+                      {experiments.map(exp => <option key={exp.id} value={exp.id}>{exp.title}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Storage Location</label>
+                  <select value={quickCreateForm.storage_location_id} onChange={(e) => setQuickCreateForm({...quickCreateForm, storage_location_id: e.target.value})}>
+                    <option value="">— None —</option>
+                    {storageLocations.map(l => (
+                      <option key={l.id} value={l.id}>
+                        {l.unit_name || ''}{l.rack ? ` → Rack ${l.rack}` : ''}{l.box ? ` → Box ${l.box}` : ''}{l.position ? ` → Pos ${l.position}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Quantity</label>
+                    <input type="number" step="any" value={quickCreateForm.quantity} onChange={(e) => setQuickCreateForm({...quickCreateForm, quantity: e.target.value})} placeholder="e.g., 10" />
+                  </div>
+                  <div className="form-group">
+                    <label>Unit</label>
+                    <input value={quickCreateForm.quantity_unit} onChange={(e) => setQuickCreateForm({...quickCreateForm, quantity_unit: e.target.value})} placeholder="e.g., µL, vials" />
+                  </div>
+                </div>
+              </>
+            )}
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowQuickCreate(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleQuickCreate}>Create & Add</button>
