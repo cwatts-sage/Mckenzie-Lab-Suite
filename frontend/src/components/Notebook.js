@@ -5,7 +5,7 @@ import DeleteConfirmModal from './DeleteConfirmModal';
 
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', desc: 'Steps followed' },
-  { value: 'result', label: '📊 Result', desc: 'Data & conclusions' },
+  { value: 'result', label: '📊 Result', desc: 'Data & conclusions', color: '#e67e22' },
   { value: 'note', label: '📝 Note', desc: 'General notes' },
 ];
 
@@ -799,7 +799,7 @@ function Notebook() {
     return (
       <div key={entry.id} style={{
         border:'1px solid #eee', borderRadius:12, padding:16, marginBottom:10,
-        borderLeft:`4px solid ${entry.entry_type === 'protocol' ? '#3498db' : entry.entry_type === 'result' ? '#27ae60' : '#95a5a6'}`
+        borderLeft:`4px solid ${entry.entry_type === 'protocol' ? '#3498db' : entry.entry_type === 'result' ? '#e67e22' : '#95a5a6'}`
       }}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8}}>
           <div style={{flex:1}}>
@@ -837,19 +837,7 @@ function Notebook() {
           </div>
         )}
 
-        {/* Linked items chips */}
-        {entry.linked_items && entry.linked_items.length > 0 && (
-          <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
-            {entry.linked_items.map((li, i) => (
-              <span key={i} style={{
-                background: li.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
-                padding:'3px 8px', borderRadius:10, fontSize:'0.75rem', fontWeight:500
-              }}>
-                {li.type === 'reagent' ? '📦' : '🧫'} {li.name}
-              </span>
-            ))}
-          </div>
-        )}
+
       </div>
     );
   }

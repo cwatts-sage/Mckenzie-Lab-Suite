@@ -12,7 +12,7 @@ const STATUS_OPTIONS = [
 
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', color: '#3498db' },
-  { value: 'result', label: '📊 Result', color: '#27ae60' },
+  { value: 'result', label: '📊 Result', color: '#e67e22' },
   { value: 'note', label: '📝 Note', color: '#95a5a6' },
 ];
 
@@ -778,18 +778,7 @@ function ExperimentDetail() {
                               {renderContent(entry.content, entry.linked_items)}
                             </div>
                           )}
-                          {entry.linked_items && entry.linked_items.length > 0 && (
-                            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                              {entry.linked_items.map((li, j) => (
-                                <span key={j} style={{
-                                  background: li.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
-                                  padding:'3px 8px',borderRadius:10,fontSize:'0.75rem',fontWeight:500
-                                }}>
-                                  {li.type === 'reagent' ? '📦' : '🧫'} {li.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+
                         </div>
                       );
                     })}

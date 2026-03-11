@@ -12,7 +12,7 @@ const STATUS_OPTIONS = [
 
 const ENTRY_TYPES = [
   { value: 'protocol', label: '📋 Protocol', color: '#3498db' },
-  { value: 'result', label: '📊 Result', color: '#27ae60' },
+  { value: 'result', label: '📊 Result', color: '#e67e22' },
   { value: 'note', label: '📝 Note', color: '#95a5a6' },
 ];
 
