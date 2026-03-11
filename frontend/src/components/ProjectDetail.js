@@ -73,6 +73,9 @@ function ProjectDetail() {
   const [collapsedExps, setCollapsedExps] = useState(new Set());
   const [collapsedReps, setCollapsedReps] = useState(new Set());
 
+  // Sidebar toggle
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // Delete
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteType, setDeleteType] = useState('');
@@ -499,43 +502,60 @@ function ProjectDetail() {
 
       {/* Main Content Area */}
       <div style={{display:'flex',gap:20,alignItems:'flex-start',flexWrap:'wrap'}}>
-        {/* Sidebar */}
-        <div style={{width:280,minWidth:280,flexShrink:0}}>
-          {/* Mini Calendar */}
-          <div className="card" style={{padding:16}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-              <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth - 1, 1))}>←</button>
-              <strong style={{fontSize:'0.9rem'}}>{calendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</strong>
-              <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth + 1, 1))}>→</button>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:2,textAlign:'center',fontSize:'0.75rem'}}>
-              {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (<div key={d} style={{fontWeight:600,color:'#888',padding:4}}>{d}</div>))}
-              {Array.from({ length: firstDayOfWeek }).map((_, i) => <div key={`e-${i}`} />)}
-              {Array.from({ length: daysInMonth }).map((_, i) => {
-                const day = i + 1;
-                const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const hasEntries = !!entryDatesMap[dateStr];
-                const isToday = dateStr === new Date().toISOString().split('T')[0];
-                return (
-                  <div key={day} style={{ padding:4, borderRadius:6, cursor: hasEntries ? 'pointer' : 'default', background: isToday ? '#eef4fb' : 'transparent', fontWeight: isToday ? 700 : 400, position:'relative' }}
-                    onClick={() => hasEntries && setViewMode('all-entries')}>
-                    {day}
-                    {hasEntries && (<div style={{display:'flex',gap:1,justifyContent:'center',marginTop:1}}>{[...entryDatesMap[dateStr]].slice(0,3).map((t, j) => { const ti = typeInfo(t); return <div key={j} style={{width:5,height:5,borderRadius:'50%',background:ti.color}} />; })}</div>)}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        {/* Sidebar Toggle */}
+        <div style={{position:'relative'}}>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            style={{
+              position: sidebarOpen ? 'static' : 'static',
+              padding:'6px 10px', fontSize:'0.85rem', whiteSpace:'nowrap',
+              display:'flex', alignItems:'center', gap:4
+            }}
+            title={sidebarOpen ? 'Hide sidebar' : 'Show calendar & scratch pad'}
+          >
+            {sidebarOpen ? '◀ Hide' : '📅 Tools ▶'}
+          </button>
 
-          {/* Scratch Pad */}
-          <div className="card" style={{padding:16,marginTop:12}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-              <label style={{fontSize:'0.85rem',fontWeight:600,color:'#444'}}>📝 Scratch Pad</label>
-              {scratchSaving && <span style={{fontSize:'0.7rem',color:'#888'}}>Saving...</span>}
+          {sidebarOpen && (
+            <div style={{width:280,minWidth:280,flexShrink:0,marginTop:8}}>
+              {/* Mini Calendar */}
+              <div className="card" style={{padding:16}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth - 1, 1))}>←</button>
+                  <strong style={{fontSize:'0.9rem'}}>{calendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</strong>
+                  <button className="btn btn-sm btn-secondary" onClick={() => setCalendarDate(new Date(calYear, calMonth + 1, 1))}>→</button>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:2,textAlign:'center',fontSize:'0.75rem'}}>
+                  {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (<div key={d} style={{fontWeight:600,color:'#888',padding:4}}>{d}</div>))}
+                  {Array.from({ length: firstDayOfWeek }).map((_, i) => <div key={`e-${i}`} />)}
+                  {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const hasEntries = !!entryDatesMap[dateStr];
+                    const isToday = dateStr === new Date().toISOString().split('T')[0];
+                    return (
+                      <div key={day} style={{ padding:4, borderRadius:6, cursor: hasEntries ? 'pointer' : 'default', background: isToday ? '#eef4fb' : 'transparent', fontWeight: isToday ? 700 : 400, position:'relative' }}
+                        onClick={() => hasEntries && setViewMode('all-entries')}>
+                        {day}
+                        {hasEntries && (<div style={{display:'flex',gap:1,justifyContent:'center',marginTop:1}}>{[...entryDatesMap[dateStr]].slice(0,3).map((t, j) => { const ti = typeInfo(t); return <div key={j} style={{width:5,height:5,borderRadius:'50%',background:ti.color}} />; })}</div>)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Scratch Pad */}
+              <div className="card" style={{padding:16,marginTop:12}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                  <label style={{fontSize:'0.85rem',fontWeight:600,color:'#444'}}>📝 Scratch Pad</label>
+                  {scratchSaving && <span style={{fontSize:'0.7rem',color:'#888'}}>Saving...</span>}
+                </div>
+                <textarea value={scratchPad} onChange={(e) => handleScratchPadChange(e.target.value)} placeholder="Quick notes, ideas, to-dos..." rows={6}
+                  style={{ width:'100%',resize:'vertical',border:'1px solid #eee',borderRadius:8, padding:10,fontSize:'0.85rem',fontFamily:'inherit',lineHeight:1.5 }} />
+              </div>
             </div>
-            <textarea value={scratchPad} onChange={(e) => handleScratchPadChange(e.target.value)} placeholder="Quick notes, ideas, to-dos..." rows={6}
-              style={{ width:'100%',resize:'vertical',border:'1px solid #eee',borderRadius:8, padding:10,fontSize:'0.85rem',fontFamily:'inherit',lineHeight:1.5 }} />
-          </div>
+          )}
         </div>
 
         {/* Main content */}
