@@ -59,12 +59,13 @@ function Hub({ user }) {
         <div className="hub-card" onClick={() => navigate('/notebook')}>
           <div className="hub-card-icon">📓</div>
           <h3>Notebook</h3>
-          <p className="hub-card-desc">Lab notebook with experiment tracking</p>
+          <p className="hub-card-desc">Lab notebook with project tracking</p>
           {loading ? (
             <div className="hub-card-stats">Loading...</div>
           ) : summary ? (
             <div className="hub-card-stats">
-              <span>{summary.notebook.experiment_count} experiment{summary.notebook.experiment_count !== 1 ? 's' : ''}</span>
+              <span>📁 {summary.notebook.project_count || 0} project{(summary.notebook.project_count || 0) !== 1 ? 's' : ''}</span>
+              <span>🧪 {summary.notebook.experiment_count} experiment{summary.notebook.experiment_count !== 1 ? 's' : ''}</span>
               {summary.notebook.recent_entry_count > 0 && (
                 <span>📝 {summary.notebook.recent_entry_count} entries this week</span>
               )}

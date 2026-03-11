@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { notebookAPI, experimentAPI, reagentAPI, sampleAPI, storageAPI } from '../api';
+import { notebookAPI, experimentAPI, projectAPI, reagentAPI, sampleAPI, storageAPI } from '../api';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
 const ENTRY_TYPES = [
@@ -12,6 +12,7 @@ const ENTRY_TYPES = [
 function Notebook() {
   const navigate = useNavigate();
   const [entries, setEntries] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [experiments, setExperiments] = useState([]);
   const [reagents, setReagents] = useState([]);
   const [samples, setSamples] = useState([]);
@@ -27,6 +28,7 @@ function Notebook() {
 
   // Filters
   const [searchParams, setSearchParams] = useSearchParams();
+  const [filterProject, setFilterProject] = useState(searchParams.get('project') || '');
   const [filterExperiment, setFilterExperiment] = useState(searchParams.get('experiment') || '');
   const [filterType, setFilterType] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
@@ -36,7 +38,7 @@ function Notebook() {
 
 
   // Form
-  const emptyForm = { title: '', content: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'note', linked_items: [] };
+  const emptyForm = { title: '', content: '', project_id: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'note', linked_items: [] };
   const [form, setForm] = useState(emptyForm);
   const [originalLinkedItems, setOriginalLinkedItems] = useState([]);
 
@@ -64,20 +66,23 @@ function Notebook() {
   const fetchData = useCallback(async () => {
     try {
       const params = {};
+      if (filterProject) params.project_id = filterProject;
       if (filterExperiment) params.experiment_id = filterExperiment;
       if (filterType) params.type = filterType;
       if (filterDateFrom) params.date_from = filterDateFrom;
       if (filterDateTo) params.date_to = filterDateTo;
       if (search) params.search = search;
 
-      const [entriesRes, expRes, reagentsRes, samplesRes, locsRes] = await Promise.all([
+      const [entriesRes, projRes, expRes, reagentsRes, samplesRes, locsRes] = await Promise.all([
         notebookAPI.getAll(params),
+        projectAPI.getAll(),
         experimentAPI.getAll(),
         reagentAPI.getAll(),
         sampleAPI.getAll(),
         storageAPI.getLocations(),
       ]);
       setEntries(entriesRes.data);
+      setProjects(projRes.data);
       setExperiments(expRes.data);
       setReagents(reagentsRes.data);
       setSamples(samplesRes.data);
@@ -87,12 +92,12 @@ function Notebook() {
     } finally {
       setLoading(false);
     }
-  }, [filterExperiment, filterType, filterDateFrom, filterDateTo, search]);
+  }, [filterProject, filterExperiment, filterType, filterDateFrom, filterDateTo, search]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const openAdd = () => {
-    setForm({ ...emptyForm, experiment_id: filterExperiment || '', entry_date: new Date().toISOString().split('T')[0] });
+    setForm({ ...emptyForm, project_id: filterProject || '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0] });
     setOriginalLinkedItems([]);
     setEditing(null);
     setShowModal(true);
@@ -102,6 +107,7 @@ function Notebook() {
     const items = entry.linked_items || [];
     setForm({
       title: entry.title, content: entry.content,
+      project_id: entry.project_id || '',
       experiment_id: entry.experiment_id || '',
       entry_date: entry.entry_date,
       entry_type: entry.entry_type,
@@ -430,9 +436,9 @@ function Notebook() {
         {/* Filters */}
         <div className="search-bar" style={{flexWrap:'wrap'}}>
           <input type="text" placeholder="Search entries..." value={search} onChange={(e) => setSearch(e.target.value)} style={{minWidth:150}} />
-          <select value={filterExperiment} onChange={(e) => { setFilterExperiment(e.target.value); setSearchParams(e.target.value ? {experiment: e.target.value} : {}); }}>
-            <option value="">All Experiments</option>
-            {experiments.map(exp => <option key={exp.id} value={exp.id}>{exp.title}</option>)}
+          <select value={filterProject} onChange={(e) => { setFilterProject(e.target.value); setFilterExperiment(''); setSearchParams(e.target.value ? {project: e.target.value} : {}); }}>
+            <option value="">All Projects</option>
+            {projects.map(proj => <option key={proj.id} value={proj.id}>📁 {proj.title}</option>)}
           </select>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
             <option value="">All Types</option>
@@ -478,11 +484,11 @@ function Notebook() {
             </div>
             <div className="form-row">
               <div className="form-group">
-                <label>Experiment</label>
-                <select value={form.experiment_id} onChange={(e) => setForm({...form, experiment_id: e.target.value})}>
-                  <option value="">— No experiment —</option>
-                  {experiments.filter(e => e.status === 'active' || e.id === form.experiment_id).map(exp => (
-                    <option key={exp.id} value={exp.id}>{exp.title}</option>
+                <label>Project</label>
+                <select value={form.project_id || ''} onChange={(e) => setForm({...form, project_id: e.target.value, experiment_id: ''})}>
+                  <option value="">— No project —</option>
+                  {projects.map(proj => (
+                    <option key={proj.id} value={proj.id}>📁 {proj.title}</option>
                   ))}
                 </select>
               </div>

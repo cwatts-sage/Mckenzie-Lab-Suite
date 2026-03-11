@@ -36,6 +36,8 @@ function enrichSample(s, locsMap, unitsMap) {
     date_collected: s.dateCollected || null,
     experiment: s.experiment || null,
     experiment_id: s.experimentId || null,
+    project_id: s.projectId || null,
+    project_name: s.projectName || null,
     organism_strain: s.organismStrain || null,
     storage_location_id: s.storageLocationId || null,
     quantity: s.quantity ?? null,
@@ -105,6 +107,11 @@ app.http('samplesGet', {
         samples = samples.filter(r => r.experiment_id === experimentId);
       }
 
+      const projectId = req.query.get('project_id');
+      if (projectId) {
+        samples = samples.filter(r => r.project_id === projectId);
+      }
+
       samples.sort((a, b) => (b.date_collected || '').localeCompare(a.date_collected || '') || (a.name || '').localeCompare(b.name || ''));
       return jsonResponse(200, samples);
     } catch (e) {
@@ -156,6 +163,8 @@ app.http('samplesCreate', {
         updatedAt: now
       };
       if (body.experiment_id) entity.experimentId = body.experiment_id;
+      if (body.project_id) entity.projectId = body.project_id;
+      if (body.project_name) entity.projectName = body.project_name;
 
       await table.createEntity(entity);
 
@@ -195,6 +204,8 @@ app.http('samplesUpdate', {
         date_collected: 'dateCollected',
         experiment: 'experiment',
         experiment_id: 'experimentId',
+        project_id: 'projectId',
+        project_name: 'projectName',
         organism_strain: 'organismStrain',
         storage_location_id: 'storageLocationId',
         quantity: 'quantity',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sampleAPI, storageAPI, experimentAPI } from '../api';
+import { sampleAPI, storageAPI, experimentAPI, projectAPI } from '../api';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
 function Samples() {
@@ -11,14 +11,20 @@ function Samples() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [projects, setProjects] = useState([]);
   const [filterUnit, setFilterUnit] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterProject, setFilterProject] = useState('');
   const [filterExperiment, setFilterExperiment] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingSample, setEditingSample] = useState(null);
   const [form, setForm] = useState(getEmptyForm());
   const [deleteTarget, setDeleteTarget] = useState(null);
   const navigate = useNavigate();
+
+  // Project dropdown state
+  const [projDropdownOpen, setProjDropdownOpen] = useState(false);
+  const [projSearch, setProjSearch] = useState('');
 
   // Experiment dropdown state
   const [expDropdownOpen, setExpDropdownOpen] = useState(false);
@@ -31,7 +37,8 @@ function Samples() {
 
   function getEmptyForm() {
     return {
-      name: '', date_collected: '', experiment: '', experiment_id: null, organism_strain: '',
+      name: '', date_collected: '', experiment: '', experiment_id: null,
+      project_id: null, project_name: '', organism_strain: '',
       storage_location_id: '', quantity: '', quantity_unit: '',
       notes: '', status: 'stored'
     };
@@ -43,25 +50,28 @@ function Samples() {
       if (search) params.search = search;
       if (filterUnit) params.unit_id = filterUnit;
       if (filterStatus) params.status = filterStatus;
+      if (filterProject) params.project_id = filterProject;
       if (filterExperiment) params.experiment_id = filterExperiment;
 
-      const [samplesRes, unitsRes, locsRes, expsRes] = await Promise.all([
+      const [samplesRes, unitsRes, locsRes, expsRes, projsRes] = await Promise.all([
         sampleAPI.getAll(params),
         storageAPI.getUnits(),
         storageAPI.getLocations(),
         experimentAPI.getAll(),
+        projectAPI.getAll(),
       ]);
       setSamples(samplesRes.data);
       setStorageUnits(unitsRes.data);
       setLocations(locsRes.data);
       setExperiments(expsRes.data);
+      setProjects(projsRes.data);
     } catch (err) {
       console.error('Failed to fetch data:', err);
       setError('Failed to load samples: ' + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
     }
-  }, [search, filterUnit, filterStatus, filterExperiment]);
+  }, [search, filterUnit, filterStatus, filterProject, filterExperiment]);
 
   useEffect(() => {
     fetchData();
@@ -85,6 +95,8 @@ function Samples() {
       date_collected: sample.date_collected || '',
       experiment: sample.experiment || '',
       experiment_id: sample.experiment_id || null,
+      project_id: sample.project_id || null,
+      project_name: sample.project_name || '',
       organism_strain: sample.organism_strain || '',
       storage_location_id: sample.storage_location_id || '',
       quantity: sample.quantity ?? '',
@@ -92,6 +104,8 @@ function Samples() {
       notes: sample.notes || '',
       status: sample.status || 'stored',
     });
+    setProjSearch(sample.project_name || '');
+    setProjDropdownOpen(false);
     setExpSearch(sample.experiment || '');
     setExpDropdownOpen(false);
     setShowModal(true);
@@ -104,6 +118,8 @@ function Samples() {
         quantity: form.quantity !== '' ? parseFloat(form.quantity) : null,
         storage_location_id: form.storage_location_id || null,
         experiment_id: form.experiment_id || null,
+      project_id: form.project_id || null,
+      project_name: form.project_name || '',
       };
 
       if (editingSample) {
@@ -127,6 +143,23 @@ function Samples() {
       alert('Failed to delete');
     }
   };
+
+  // Project combo box helpers
+  const handleProjSearchChange = (val) => {
+    setProjSearch(val);
+    setForm({ ...form, project_name: val, project_id: null });
+    setProjDropdownOpen(true);
+  };
+
+  const selectProject = (proj) => {
+    setForm({ ...form, project_name: proj.title, project_id: proj.id });
+    setProjSearch(proj.title);
+    setProjDropdownOpen(false);
+  };
+
+  const filteredProjects = projects.filter(p =>
+    !projSearch || (p.title || '').toLowerCase().includes(projSearch.toLowerCase())
+  );
 
   // Experiment combo box helpers
   const handleExpSearchChange = (val) => {
@@ -205,10 +238,10 @@ function Samples() {
               <option key={u.id} value={u.id}>{u.name} ({u.temperature})</option>
             ))}
           </select>
-          <select value={filterExperiment} onChange={(e) => setFilterExperiment(e.target.value)}>
-            <option value="">All Experiments</option>
-            {experiments.map(exp => (
-              <option key={exp.id} value={exp.id}>{exp.title}</option>
+          <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
+            <option value="">All Projects</option>
+            {projects.map(proj => (
+              <option key={proj.id} value={proj.id}>📁 {proj.title}</option>
             ))}
           </select>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
@@ -231,6 +264,7 @@ function Samples() {
                 <tr>
                   <th>Name</th>
                   <th>Date</th>
+                  <th>Project</th>
                   <th>Experiment</th>
                   <th>Strain</th>
                   <th>Location</th>
@@ -254,13 +288,14 @@ function Samples() {
                         </td>
                         <td>{s.date_collected || '—'}</td>
                         <td>
-                          {s.experiment_id ? (
+                          {s.project_id ? (
                             <span style={{color:'#3498db',cursor:'pointer',textDecoration:'underline'}}
-                              onClick={(e) => { e.stopPropagation(); navigate(`/notebook/experiments/${s.experiment_id}`); }}>
-                              {s.experiment || 'View'}
+                              onClick={(e) => { e.stopPropagation(); navigate(`/notebook/projects/${s.project_id}`); }}>
+                              {s.project_name || 'View'}
                             </span>
-                          ) : (s.experiment || '—')}
+                          ) : '—'}
                         </td>
+                        <td>{s.experiment || '—'}</td>
                         <td>{s.organism_strain || '—'}</td>
                         <td style={{fontSize:'0.85rem'}}>{formatLocation(s)}</td>
                         <td>{s.quantity != null ? `${s.quantity} ${s.quantity_unit || ''}` : '—'}</td>
@@ -272,7 +307,7 @@ function Samples() {
                       </tr>
                       {isExpanded && (
                         <tr>
-                          <td colSpan={8} style={{background:'#f8f9fa',padding:16}}>
+                          <td colSpan={9} style={{background:'#f8f9fa',padding:16}}>
                             {loadingRefs ? (
                               <div style={{color:'#888',fontSize:'0.9rem'}}>Loading references...</div>
                             ) : sampleRefs ? (
@@ -350,6 +385,48 @@ function Samples() {
                   <option value="depleted">Depleted</option>
                 </select>
               </div>
+            </div>
+
+            {/* Project picker */}
+            <div className="form-group" style={{position:'relative'}}>
+              <label>Project</label>
+              <input
+                value={projSearch}
+                onChange={(e) => handleProjSearchChange(e.target.value)}
+                onFocus={() => setProjDropdownOpen(true)}
+                placeholder="Search projects..."
+              />
+              {form.project_id && (
+                <div style={{fontSize:'0.8rem',color:'#27ae60',marginTop:4}}>
+                  ✓ Linked to project
+                  <span style={{cursor:'pointer',color:'#e74c3c',marginLeft:8}} onClick={() => {
+                    setForm({...form, project_id: null, project_name: ''});
+                    setProjSearch('');
+                  }}>× Unlink</span>
+                </div>
+              )}
+              {projDropdownOpen && (
+                <div style={{
+                  position:'absolute',left:0,right:0,top:'100%',
+                  background:'white',border:'1px solid #ddd',borderRadius:8,
+                  boxShadow:'0 4px 12px rgba(0,0,0,0.1)',maxHeight:200,overflowY:'auto',zIndex:200
+                }}>
+                  {filteredProjects.length === 0 ? (
+                    <div style={{padding:12,color:'#999',fontSize:'0.9rem'}}>No matching projects</div>
+                  ) : (
+                    filteredProjects.map(proj => (
+                      <div key={proj.id} style={{padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',fontSize:'0.9rem'}}
+                        onClick={() => selectProject(proj)}
+                        onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'white'}
+                      >
+                        📁 {proj.title}
+                        <span className={`badge badge-${proj.status === 'active' ? 'success' : 'info'}`} style={{marginLeft:8,fontSize:'0.7rem'}}>{proj.status}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Experiment combo box */}

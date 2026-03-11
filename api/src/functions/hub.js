@@ -38,13 +38,17 @@ app.http('hubSummary', {
         sampleCount++;
       }
 
-      // Get experiment count (will be 0 until notebook is built)
-      let experimentCount = 0, recentEntryCount = 0;
+      // Get project & experiment counts
+      let projectCount = 0, experimentCount = 0, recentEntryCount = 0;
       try {
         const experimentsTable = await getTable('experiments');
         const experiments = experimentsTable.listEntities({ queryOptions: { filter: `PartitionKey eq '${userId}'` } });
         for await (const e of experiments) {
-          experimentCount++;
+          if (!e.projectId) {
+            projectCount++;
+          } else {
+            experimentCount++;
+          }
         }
 
         // Get entries from last 7 days
@@ -66,6 +70,7 @@ app.http('hubSummary', {
           expiring_count: expiringCount,
         },
         notebook: {
+          project_count: projectCount,
           experiment_count: experimentCount,
           recent_entry_count: recentEntryCount,
         }

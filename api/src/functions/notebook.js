@@ -14,6 +14,8 @@ app.http('notebookGet', {
 
     try {
       const experimentId = req.query.get('experiment_id');
+      const projectId = req.query.get('project_id');
+      const replicateId = req.query.get('replicate_id');
       const dateFrom = req.query.get('date_from');
       const dateTo = req.query.get('date_to');
       const entryType = req.query.get('type');
@@ -26,6 +28,8 @@ app.http('notebookGet', {
         const item = {
           id: entity.rowKey,
           experiment_id: entity.experimentId || null,
+          project_id: entity.projectId || null,
+          replicate_id: entity.replicateId || null,
           title: entity.title || '',
           content: entity.content || '',
           entry_date: entity.entryDate || '',
@@ -41,6 +45,19 @@ app.http('notebookGet', {
       // Apply filters
       if (experimentId) {
         items = items.filter(i => i.experiment_id === experimentId);
+      }
+      if (projectId) {
+        // Get all experiment IDs for this project, then filter entries by those + direct project entries
+        const expTable = await getTable('experiments');
+        const expIds = new Set();
+        const exps = expTable.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
+        for await (const exp of exps) {
+          if (exp.projectId === projectId) expIds.add(exp.rowKey);
+        }
+        items = items.filter(i => i.project_id === projectId || expIds.has(i.experiment_id));
+      }
+      if (replicateId) {
+        items = items.filter(i => i.replicate_id === replicateId);
       }
       if (dateFrom) {
         items = items.filter(i => i.entry_date >= dateFrom);
@@ -99,12 +116,26 @@ app.http('notebookCreate', {
         updatedAt: now
       };
       if (body.experiment_id) entity.experimentId = body.experiment_id;
+      if (body.project_id) entity.projectId = body.project_id;
+      if (body.replicate_id) entity.replicateId = body.replicate_id;
       if (body.content) entity.content = body.content;
 
       await table.createEntity(entity);
 
+      // Update replicate last_updated if linked to one
+      if (body.replicate_id) {
+        try {
+          const repTable = await getTable('replicates');
+          const rep = await repTable.getEntity(decoded.id, body.replicate_id);
+          rep.lastUpdated = now;
+          await repTable.updateEntity(rep, 'Merge');
+        } catch (e) { /* ok */ }
+      }
+
       return jsonResponse(201, {
         id, experiment_id: entity.experimentId || null,
+        project_id: entity.projectId || null,
+        replicate_id: entity.replicateId || null,
         title: entity.title, content: entity.content,
         entry_date: entity.entryDate, entry_type: entity.entryType,
         linked_items: body.linked_items || [], media: body.media || [],
@@ -167,14 +198,20 @@ app.http('notebookUpdate', {
         updatedAt: now
       };
       const expId = body.experiment_id !== undefined ? body.experiment_id : (existing.experimentId || '');
+      const projId = body.project_id !== undefined ? body.project_id : (existing.projectId || '');
+      const repId = body.replicate_id !== undefined ? body.replicate_id : (existing.replicateId || '');
       const content = body.content !== undefined ? body.content : (existing.content || '');
       if (expId) updated.experimentId = expId;
+      if (projId) updated.projectId = projId;
+      if (repId) updated.replicateId = repId;
       if (content) updated.content = content;
 
       await table.updateEntity(updated, 'Replace');
 
       return jsonResponse(200, {
         id, experiment_id: updated.experimentId || null,
+        project_id: updated.projectId || null,
+        replicate_id: updated.replicateId || null,
         title: updated.title, content: updated.content,
         entry_date: updated.entryDate, entry_type: updated.entryType,
         linked_items: JSON.parse(updated.linkedItems),

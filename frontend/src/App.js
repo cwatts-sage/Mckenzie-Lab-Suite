@@ -13,6 +13,8 @@ import Admin from './components/Admin';
 import Notebook from './components/Notebook';
 import Experiments from './components/Experiments';
 import ExperimentDetail from './components/ExperimentDetail';
+import Projects from './components/Projects';
+import ProjectDetail from './components/ProjectDetail';
 import Notes from './components/Notes';
 import './App.css';
 
@@ -36,7 +38,7 @@ function SubNav() {
     return (
       <div className="sub-nav">
         <NavLink to="/notebook" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📝 Entries</NavLink>
-        <NavLink to="/notebook/experiments" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🧪 Experiments</NavLink>
+        <NavLink to="/notebook/projects" className={({ isActive }) => isActive || location.pathname.startsWith('/notebook/projects') ? 'sub-nav-link active' : 'sub-nav-link'}>📁 Projects</NavLink>
         <NavLink to="/notebook/notes" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📝 Notes</NavLink>
       </div>
     );
@@ -92,6 +94,8 @@ function AppContent({ user, setUser, handleLogout }) {
           <Route path="/inventory/catalog" element={<Catalog />} />
           <Route path="/inventory/export" element={<Export />} />
           <Route path="/notebook" element={<Notebook />} />
+          <Route path="/notebook/projects" element={<Projects />} />
+          <Route path="/notebook/projects/:id" element={<ProjectDetail />} />
           <Route path="/notebook/experiments" element={<Experiments />} />
           <Route path="/notebook/experiments/:id" element={<ExperimentDetail />} />
           <Route path="/notebook/notes" element={<Notes />} />

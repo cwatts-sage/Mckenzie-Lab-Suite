@@ -66,13 +66,32 @@ export const adminAPI = {
   deleteUser: (id) => api.delete(`/manage/users/${id}`),
 };
 
-// Experiments
+// Experiments (legacy — kept for backward compat)
 export const experimentAPI = {
   getAll: () => api.get('/experiments'),
   getOne: (id) => api.get(`/experiments/${id}`),
   create: (data) => api.post('/experiments', data),
   update: (id, data) => api.put(`/experiments/${id}`, data),
   delete: (id) => api.delete(`/experiments/${id}`),
+};
+
+// Projects
+export const projectAPI = {
+  getAll: () => api.get('/projects'),
+  getOne: (id) => api.get(`/projects/${id}`),
+  create: (data) => api.post('/projects', data),
+  update: (id, data) => api.put(`/projects/${id}`, data),
+  delete: (id) => api.delete(`/projects/${id}`),
+  createExperiment: (projectId, data) => api.post(`/projects/${projectId}/experiments`, data),
+  getExperiment: (projectId, expId) => api.get(`/projects/${projectId}/experiments/${expId}`),
+  updateExperiment: (projectId, expId, data) => api.put(`/projects/${projectId}/experiments/${expId}`, data),
+  deleteExperiment: (projectId, expId) => api.delete(`/projects/${projectId}/experiments/${expId}`),
+};
+
+// Replicates
+export const replicateAPI = {
+  create: (expId, data) => api.post(`/experiments/${expId}/replicates`, data || {}),
+  delete: (expId, repId) => api.delete(`/experiments/${expId}/replicates/${repId}`),
 };
 
 // Notebook
