@@ -465,7 +465,7 @@ function ExperimentDetail() {
         return (
           <span key={i} style={{
             background: linked?.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
-            padding: '1px 6px', borderRadius: 4, fontWeight: 500,
+            padding: '1px 6px', borderRadius: 4, fontWeight: 700,
             fontSize: '0.9em', cursor: linked ? 'pointer' : 'default'
           }} title={linked ? `Click to view ${linked.type}: ${linked.name}` : name}
             onClick={() => {
@@ -476,7 +476,7 @@ function ExperimentDetail() {
             onMouseOver={(e) => { if (linked) e.currentTarget.style.opacity = '0.7'; }}
             onMouseOut={(e) => { if (linked) e.currentTarget.style.opacity = '1'; }}
           >
-            @{name}
+            {name}
           </span>
         );
       }

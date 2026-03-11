@@ -30,6 +30,7 @@ function ProjectDetail() {
 
   // View mode: 'experiments' or 'all-entries'
   const [viewMode, setViewMode] = useState('experiments');
+  const [entryTypeFilter, setEntryTypeFilter] = useState('');
 
   // Edit project modal
   const [showEditModal, setShowEditModal] = useState(false);
@@ -146,13 +147,13 @@ function ProjectDetail() {
 
   // Experiments
   const openAddExperiment = () => {
-    setExpForm({ title: '', description: '', tags: '' });
+    setExpForm({ title: '', description: '', tags: '', status: 'active' });
     setEditingExp(null);
     setShowExpModal(true);
   };
 
   const openEditExperiment = (exp) => {
-    setExpForm({ title: exp.title, description: exp.description || '', tags: exp.tags || '' });
+    setExpForm({ title: exp.title, description: exp.description || '', tags: exp.tags || '', status: exp.status || 'active' });
     setEditingExp(exp);
     setShowExpModal(true);
   };
@@ -369,13 +370,13 @@ function ProjectDetail() {
         return (
           <span key={i} style={{
             background: linked?.type === 'reagent' ? '#d6eaf8' : '#d5f5e3',
-            padding: '1px 6px', borderRadius: 4, fontWeight: 500,
+            padding: '1px 6px', borderRadius: 4, fontWeight: 700,
             fontSize: '0.9em', cursor: linked ? 'pointer' : 'default'
           }} title={linked ? `Click to view ${linked.type}: ${linked.name}` : name}
             onClick={() => { if (linked) navigate(linked.type === 'reagent' ? '/inventory/reagents' : '/inventory'); }}
             onMouseOver={(e) => { if (linked) e.currentTarget.style.opacity = '0.7'; }}
             onMouseOut={(e) => { if (linked) e.currentTarget.style.opacity = '1'; }}
-          >@{name}</span>
+          >{name}</span>
         );
       }
       const linkMatch = part.match(/^\[(.+)\]\((.+)\)$/);
@@ -430,10 +431,11 @@ function ProjectDetail() {
   const si = statusInfo(project.status);
   const experiments = project.experiments || [];
 
-  // Get entries for a specific experiment+replicate
-  const getEntriesForReplicate = (expId, repId) => entries.filter(e => e.experiment_id === expId && e.replicate_id === repId);
-  const getEntriesForExperiment = (expId) => entries.filter(e => e.experiment_id === expId);
-  const getProjectLevelEntries = () => entries.filter(e => !e.experiment_id || e.project_id === id && !e.experiment_id);
+  // Get entries for a specific experiment+replicate (with type filter)
+  const applyTypeFilter = (items) => entryTypeFilter ? items.filter(e => e.entry_type === entryTypeFilter) : items;
+  const getEntriesForReplicate = (expId, repId) => applyTypeFilter(entries.filter(e => e.experiment_id === expId && e.replicate_id === repId));
+  const getEntriesForExperiment = (expId) => applyTypeFilter(entries.filter(e => e.experiment_id === expId));
+  const getProjectLevelEntries = () => applyTypeFilter(entries.filter(e => !e.experiment_id || (e.project_id === id && !e.experiment_id)));
 
   return (
     <div>
@@ -495,6 +497,10 @@ function ProjectDetail() {
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
         <button className={`btn btn-sm ${viewMode === 'experiments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('experiments')}>🧪 Experiments</button>
         <button className={`btn btn-sm ${viewMode === 'all-entries' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('all-entries')}>📓 All Entries ({entries.length})</button>
+        <select value={entryTypeFilter} onChange={(e) => setEntryTypeFilter(e.target.value)} style={{fontSize:'0.85rem',padding:'4px 8px',borderRadius:6,border:'1px solid #ddd'}}>
+          <option value="">All Types</option>
+          {ENTRY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
         <div style={{flex:1}} />
         <button className="btn btn-sm btn-primary" onClick={openAddExperiment}>+ New Experiment</button>
         <button className="btn btn-sm btn-secondary" onClick={() => openAddEntry('', '')}>+ Project Entry</button>
@@ -737,7 +743,10 @@ function ProjectDetail() {
             <h2>{editingExp ? 'Edit Experiment' : 'New Experiment'}</h2>
             <div className="form-group"><label>Title *</label><input value={expForm.title} onChange={(e) => setExpForm({...expForm, title: e.target.value})} autoFocus placeholder="e.g., Western Blot - GAPDH" /></div>
             <div className="form-group"><label>Description</label><textarea value={expForm.description} onChange={(e) => setExpForm({...expForm, description: e.target.value})} rows={2} style={{resize:'vertical'}} placeholder="Brief description of this experiment..." /></div>
-            <div className="form-group"><label>Tags</label><input value={expForm.tags} onChange={(e) => setExpForm({...expForm, tags: e.target.value})} placeholder="comma, separated, tags" /></div>
+            <div className="form-row">
+              <div className="form-group"><label>Status</label><select value={expForm.status} onChange={(e) => setExpForm({...expForm, status: e.target.value})}>{STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
+              <div className="form-group"><label>Tags</label><input value={expForm.tags} onChange={(e) => setExpForm({...expForm, tags: e.target.value})} placeholder="comma, separated, tags" /></div>
+            </div>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowExpModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSaveExperiment}>{editingExp ? 'Save Changes' : 'Create'}</button>
@@ -953,13 +962,7 @@ function ProjectDetail() {
             {renderContent(entry.content, entry.linked_items)}
           </div>
         )}
-        {entry.linked_items && entry.linked_items.length > 0 && (
-          <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:6}}>
-            {entry.linked_items.map((li, j) => (
-              <span key={j} style={{ background: li.type === 'reagent' ? '#d6eaf8' : '#d5f5e3', padding:'2px 6px',borderRadius:8,fontSize:'0.7rem',fontWeight:500 }}>{li.type === 'reagent' ? '📦' : '🧫'} {li.name}</span>
-            ))}
-          </div>
-        )}
+
       </div>
     );
   }
