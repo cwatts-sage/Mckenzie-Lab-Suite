@@ -596,6 +596,13 @@ function ProjectDetail() {
                               reps.map(rep => {
                                 const repEntries = getEntriesForReplicate(exp.id, rep.id);
                                 const isRepCollapsed = collapsedReps.has(rep.id);
+                                const repDates = repEntries.length > 0 ? repEntries.reduce((acc, e) => {
+                                  const d = e.entry_date || e.created_at?.split('T')[0] || '';
+                                  if (d && (!acc.oldest || d < acc.oldest)) acc.oldest = d;
+                                  if (d && (!acc.newest || d > acc.newest)) acc.newest = d;
+                                  return acc;
+                                }, { oldest: null, newest: null }) : { oldest: null, newest: null };
+
                                 return (
                                   <div key={rep.id} style={{marginBottom:12,border:'1px solid #eee',borderRadius:8,overflow:'hidden'}}>
                                     <div style={{ padding:'10px 14px', background:'#f0f4f8', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}
@@ -604,7 +611,7 @@ function ProjectDetail() {
                                         <span style={{color:'#888',fontSize:'0.8rem',transition:'transform 0.2s',transform:isRepCollapsed?'rotate(-90deg)':'rotate(0deg)'}}>▼</span>
                                         <strong style={{fontSize:'0.9rem'}}>🔁 Replicate {rep.replicate_number}</strong>
                                         <span style={{fontSize:'0.75rem',color:'#888'}}>
-                                          {new Date(rep.start_date).toLocaleDateString()} – {new Date(rep.last_updated).toLocaleDateString()}
+                                          {repDates.oldest ? `${new Date(repDates.oldest + 'T12:00:00').toLocaleDateString()} – ${new Date(repDates.newest + 'T12:00:00').toLocaleDateString()}` : 'No entries yet'}
                                         </span>
                                         <span style={{fontSize:'0.75rem',color:'#999'}}>({repEntries.length} entries)</span>
                                       </div>
