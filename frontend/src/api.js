@@ -134,4 +134,11 @@ export const notesAPI = {
   delete: (id) => api.delete(`/notes/${id}`),
 };
 
+// Trash (soft-delete)
+export const trashAPI = {
+  getAll: () => api.get('/trash'),
+  restore: (type, id) => api.post('/trash/restore', { type, id }),
+  purge: (type, id) => api.delete(`/trash/${type}/${id}`),
+};
+
 export default api;

@@ -40,7 +40,7 @@ Source: McKenzie's request list 2026-06-03. "Start with small tweaks and fixes b
 25. **Sample history / additive updates** — add to existing sample (e.g. +2 brains into same tube) with history log instead of new item. [Samples.js, samples API]
 26. **Hierarchical location (temperature → rack → box), collapsible** — cleaner display for loose items; cascading selectors when assigning location. [Storage.js, storage API, Inventory.js, Samples.js]
 27. **Picture upload to reagents**. [Inventory.js, reagents API, blob storage]
-28. **Auto-backup**. [API/storage export job]
+28. **Auto-backup**. [API/storage export job] — DEFERRED by McKenzie (2026-06-03): save for one of the final website tasks.
 
 ## TIER 3 — Larger Features
 
@@ -51,5 +51,5 @@ Source: McKenzie's request list 2026-06-03. "Start with small tweaks and fixes b
 33. **Fly strain management tab** — input FlyBase links to pull allele/strain info. [new component + API + FlyBase scraping]
 
 ## Notes
-- Soft-delete "hold onto where": new `trash` Azure Table (or `deleted` flag + deletedAt on existing entities). Decide before implementing #22.
+- Soft-delete CONFIRMED by McKenzie (2026-06-03): 7-day Trash view with Restore, then auto-purge. Approach: per-entity `deleted` flag + `deletedAt` timestamp; GET endpoints exclude deleted by default; new Trash view lists deleted items <7 days; restore clears flag; cleanup purges >7 days. Avoids data migration to a separate table.
 - Backup target: decide (blob container / external).

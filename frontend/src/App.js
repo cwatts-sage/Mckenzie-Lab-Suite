@@ -16,6 +16,7 @@ import ExperimentDetail from './components/ExperimentDetail';
 import Projects from './components/Projects';
 import ProjectDetail from './components/ProjectDetail';
 import Notes from './components/Notes';
+import Trash from './components/Trash';
 import './App.css';
 
 function SubNav() {
@@ -30,6 +31,7 @@ function SubNav() {
         <NavLink to="/inventory/storage" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🗄️ Storage</NavLink>
         <NavLink to="/inventory/catalog" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📚 Catalog</NavLink>
         <NavLink to="/inventory/export" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📄 Export</NavLink>
+        <NavLink to="/inventory/trash" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>🗑️ Trash</NavLink>
       </div>
     );
   }
@@ -93,6 +95,7 @@ function AppContent({ user, setUser, handleLogout }) {
           <Route path="/inventory/storage" element={<Storage />} />
           <Route path="/inventory/catalog" element={<Catalog />} />
           <Route path="/inventory/export" element={<Export />} />
+          <Route path="/inventory/trash" element={<Trash />} />
           <Route path="/notebook" element={<Notebook />} />
           <Route path="/notebook/projects" element={<Projects />} />
           <Route path="/notebook/projects/:id" element={<ProjectDetail />} />

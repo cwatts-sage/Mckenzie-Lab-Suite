@@ -2,6 +2,7 @@ const { app } = require('@azure/functions');
 const { v4: uuidv4 } = require('uuid');
 const { getTable } = require('../shared/db');
 const { verifyToken, jsonResponse } = require('../shared/auth');
+const { isDeleted, softDelete } = require('../shared/softDelete');
 
 // Helper: get units map
 async function getUnitsMap(userId) {
@@ -90,6 +91,7 @@ app.http('samplesGet', {
       let samples = [];
       const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of entities) {
+        if (isDeleted(entity)) continue; // hide soft-deleted from normal lists
         samples.push(enrichSample(entity, locsMap, unitsMap, expMap));
       }
 
@@ -309,13 +311,14 @@ app.http('samplesDelete', {
       const id = req.params.id;
       const table = await getTable('samples');
 
+      let entity;
       try {
-        await table.getEntity(decoded.id, id);
+        entity = await table.getEntity(decoded.id, id);
       } catch (e) {
         return jsonResponse(404, { error: 'Sample not found' });
       }
 
-      await table.deleteEntity(decoded.id, id);
+      await softDelete(table, entity); // soft-delete: moves to Trash for 7 days
       return jsonResponse(200, { success: true });
     } catch (e) {
       return jsonResponse(500, { error: e.message });

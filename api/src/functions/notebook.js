@@ -2,6 +2,7 @@ const { app } = require('@azure/functions');
 const { v4: uuidv4 } = require('uuid');
 const { getTable } = require('../shared/db');
 const { verifyToken, jsonResponse } = require('../shared/auth');
+const { isDeleted, softDelete } = require('../shared/softDelete');
 
 // GET /api/notebook — list entries with filters
 app.http('notebookGet', {
@@ -25,6 +26,7 @@ app.http('notebookGet', {
       let items = [];
       const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of entities) {
+        if (isDeleted(entity)) continue; // hide soft-deleted from normal lists
         const item = {
           id: entity.rowKey,
           experiment_id: entity.experimentId || null,
@@ -237,22 +239,15 @@ app.http('notebookDelete', {
       const id = req.params.id;
       const table = await getTable('notebookentries');
 
+      let entity;
       try {
-        await table.getEntity(decoded.id, id);
+        entity = await table.getEntity(decoded.id, id);
       } catch (e) {
         return jsonResponse(404, { error: 'Entry not found' });
       }
 
-      // Delete history
-      try {
-        const historyTable = await getTable('entryhistory');
-        const history = historyTable.listEntities({ queryOptions: { filter: `PartitionKey eq '${id}'` } });
-        for await (const h of history) {
-          await historyTable.deleteEntity(h.partitionKey, h.rowKey);
-        }
-      } catch (e) { /* ok */ }
-
-      await table.deleteEntity(decoded.id, id);
+      // Soft-delete: keep edit history intact so a restore is lossless.
+      await softDelete(table, entity); // moves to Trash for 7 days
       return jsonResponse(200, { success: true });
     } catch (e) {
       return jsonResponse(500, { error: e.message });
