@@ -135,8 +135,8 @@ app.http('projectsGetOne', {
       const allEntities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of allEntities) {
         if (entity.projectId === id) {
-          // Hide abandoned experiments from the list (abandoned = soft delete)
-          if (entity.status === 'abandoned') continue;
+          // Hide failed / archived / abandoned experiments from the active list.
+          if (entity.status === 'abandoned' || entity.status === 'failed' || entity.status === 'archived') continue;
           experiments.push(formatExperiment(entity));
         }
       }

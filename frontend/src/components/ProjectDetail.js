@@ -75,6 +75,7 @@ function ProjectDetail() {
 
   // Collapsed experiments
   const [collapsedExps, setCollapsedExps] = useState(new Set());
+  const didInitCollapse = useRef(false);
   const [collapsedReps, setCollapsedReps] = useState(new Set());
 
   // Sidebar toggle
@@ -115,6 +116,18 @@ function ProjectDetail() {
   }, [id]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Default all experiment + replicate headers to collapsed on first load of this page.
+  useEffect(() => {
+    if (!project || didInitCollapse.current) return;
+    const exps = project.experiments || [];
+    const expIds = exps.map(e => e.id);
+    const repIds = [];
+    exps.forEach(e => (e.replicates || []).forEach(r => repIds.push(r.id)));
+    setCollapsedExps(new Set(expIds));
+    setCollapsedReps(new Set(repIds));
+    didInitCollapse.current = true;
+  }, [project]);
 
   // Scratch pad auto-save
   const handleScratchPadChange = (val) => {
