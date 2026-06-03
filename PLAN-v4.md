@@ -2,6 +2,12 @@
 
 Source: McKenzie's request list 2026-06-03. "Start with small tweaks and fixes before large stuff."
 
+## PROGRESS
+- Batch 1 deployed (commit 046a51c): #1 #2 #3 #4 #5 #6 #7 #14 #15 #16 #18 #19 + reagent expiration clear
+- Batch 2 deployed (commit 6652373): #8 #11 #12 #13 #17 + sample location position removed
+- Pending deploy: #9 entry-date clear button (Notebook) — confirm intent w/ McKenzie
+- DATA MODEL: reagents gained status/concentration/notes/derivedFromId; experiments.js GET now returns project_id + conclusion and excludes project rows.
+
 ## TIER 1 — Small Tweaks & Fixes (do first)
 
 1. **Move Projects left of Entries** in lab notebook sub-nav tabs. [Notebook.js]

@@ -435,7 +435,7 @@ function Notebook() {
                 <input value={form.title} onChange={(e) => setForm({...form, title: e.target.value})} autoFocus />
               </div>
               <div className="form-group">
-                <label>Date</label>
+                <label>Date {form.entry_date && <button type="button" onClick={() => setForm({...form, entry_date: ''})} style={{marginLeft:8, fontSize:'0.75rem', background:'none', border:'none', color:'#3498db', cursor:'pointer', padding:0}}>clear</button>}</label>
                 <input type="date" value={form.entry_date} onChange={(e) => setForm({...form, entry_date: e.target.value})} />
               </div>
             </div>
