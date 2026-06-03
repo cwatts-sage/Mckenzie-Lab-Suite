@@ -54,6 +54,53 @@ function formatReplicate(entity) {
   };
 }
 
+// ==================== ARCHIVE ====================
+
+// GET /api/archive — lists hidden (abandoned/failed/archived) projects & experiments
+app.http('archiveGet', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'archive',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+
+    try {
+      const table = await getTable('experiments');
+      const projectsById = {};
+      const archivedProjects = [];
+      const archivedExperiments = [];
+
+      const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
+      const all = [];
+      for await (const entity of entities) {
+        all.push(entity);
+        if (!entity.projectId) projectsById[entity.rowKey] = entity.title || '(untitled project)';
+      }
+
+      for (const entity of all) {
+        const status = entity.status || 'active';
+        const hidden = status === 'abandoned' || status === 'failed' || status === 'archived';
+        if (!hidden) continue;
+        if (!entity.projectId) {
+          archivedProjects.push(formatProject(entity));
+        } else {
+          const exp = formatExperiment(entity);
+          exp.project_title = projectsById[entity.projectId] || null;
+          archivedExperiments.push(exp);
+        }
+      }
+
+      archivedProjects.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+      archivedExperiments.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+
+      return jsonResponse(200, { projects: archivedProjects, experiments: archivedExperiments });
+    } catch (e) {
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+});
+
 // ==================== PROJECTS ====================
 
 // GET /api/projects

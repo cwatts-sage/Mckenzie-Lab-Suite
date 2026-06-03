@@ -88,6 +88,11 @@ export const projectAPI = {
   deleteExperiment: (projectId, expId) => api.delete(`/projects/${projectId}/experiments/${expId}`),
 };
 
+// Archive (abandoned/failed/archived projects & experiments)
+export const archiveAPI = {
+  getAll: () => api.get('/archive'),
+};
+
 // Replicates
 export const replicateAPI = {
   create: (expId, data) => api.post(`/experiments/${expId}/replicates`, data || {}),
