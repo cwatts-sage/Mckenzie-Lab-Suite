@@ -29,6 +29,8 @@ function formatExperiment(entity) {
     title: entity.title || '',
     description: entity.description || '',
     status: entity.status || 'active',
+    conclusion: entity.conclusion || '',
+    failed_reason: entity.failedReason || '',
     tags: entity.tags || '',
     created_at: entity.createdAt,
     updated_at: entity.updatedAt
@@ -44,6 +46,8 @@ function formatReplicate(entity) {
     start_date: entity.startDate || entity.createdAt,
     last_updated: entity.lastUpdated || entity.createdAt,
     notes: entity.notes || '',
+    failed: entity.failed === true || entity.failed === 'true',
+    failed_reason: entity.failedReason || '',
     created_at: entity.createdAt
   };
 }
@@ -70,8 +74,10 @@ app.http('projectsGet', {
           // This is a project (top-level)
           projects.push(formatProject(entity));
         } else {
-          // This is an experiment — count per project
-          experimentCounts[entity.projectId] = (experimentCounts[entity.projectId] || 0) + 1;
+          // This is an experiment — count per project (exclude failed/archived)
+          if (entity.status !== 'failed' && entity.status !== 'archived') {
+            experimentCounts[entity.projectId] = (experimentCounts[entity.projectId] || 0) + 1;
+          }
         }
       }
 
@@ -146,12 +152,14 @@ app.http('projectsGetOne', {
         reps.sort((a, b) => b.replicate_number - a.replicate_number); // most recent first
         exp.replicates = reps;
         exp.replicate_count = reps.length;
+        exp.active_replicate_count = reps.filter(r => !r.failed).length;
       });
 
       experiments.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
 
       project.experiments = experiments;
-      project.experiment_count = experiments.length;
+      // experiment_count excludes failed/archived (active work only)
+      project.experiment_count = experiments.filter(e => e.status !== 'failed' && e.status !== 'archived').length;
 
       return jsonResponse(200, project);
     } catch (e) {
@@ -463,20 +471,26 @@ app.http('projectExperimentUpdate', {
       }
 
       const now = new Date().toISOString();
+      const status = (body.status !== undefined ? body.status : existing.status) || 'active';
       const updated = {
         partitionKey: decoded.id,
         rowKey: expId,
         projectId: existing.projectId,
         title: (body.title !== undefined ? body.title : existing.title) || '',
-        status: (body.status !== undefined ? body.status : existing.status) || 'active',
+        status,
         createdAt: existing.createdAt || now,
         updatedAt: now
       };
 
       const desc = body.description !== undefined ? body.description : (existing.description || '');
       const tgs = body.tags !== undefined ? body.tags : (existing.tags || '');
+      const concl = body.conclusion !== undefined ? body.conclusion : (existing.conclusion || '');
+      const failReason = body.failed_reason !== undefined ? body.failed_reason : (existing.failedReason || '');
       if (desc) updated.description = desc;
       if (tgs) updated.tags = tgs;
+      if (concl) updated.conclusion = concl;
+      // Only keep a failed reason while the experiment is actually failed.
+      if (status === 'failed' && failReason) updated.failedReason = failReason;
 
       await table.updateEntity(updated, 'Replace');
       return jsonResponse(200, formatExperiment(updated));
@@ -594,6 +608,42 @@ app.http('replicatesCreate', {
       await repTable.createEntity(entity);
 
       return jsonResponse(201, formatReplicate(entity));
+    } catch (e) {
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+});
+
+// PUT /api/experiments/{expId}/replicates/{repId} — update (e.g. mark failed)
+app.http('replicatesUpdate', {
+  methods: ['PUT'],
+  authLevel: 'anonymous',
+  route: 'experiments/{expId}/replicates/{repId}',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+
+    try {
+      const { repId } = req.params;
+      const body = await req.json().catch(() => ({}));
+      const repTable = await getTable('replicates');
+
+      let entity;
+      try {
+        entity = await repTable.getEntity(decoded.id, repId);
+      } catch (e) {
+        return jsonResponse(404, { error: 'Replicate not found' });
+      }
+
+      if (body.failed !== undefined) entity.failed = !!body.failed;
+      if (body.failed_reason !== undefined) entity.failedReason = body.failed_reason || '';
+      if (body.notes !== undefined) entity.notes = body.notes || '';
+      // Clear the reason when un-failing.
+      if (entity.failed === false) entity.failedReason = '';
+      entity.lastUpdated = new Date().toISOString();
+
+      await repTable.updateEntity(entity, 'Merge');
+      return jsonResponse(200, formatReplicate(entity));
     } catch (e) {
       return jsonResponse(500, { error: e.message });
     }

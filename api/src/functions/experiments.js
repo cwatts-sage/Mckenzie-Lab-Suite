@@ -143,14 +143,17 @@ app.http('experimentsUpdate', {
       }
 
       const now = new Date().toISOString();
+      const status = (body.status !== undefined ? body.status : existing.status) || 'active';
       const updated = {
         partitionKey: decoded.id,
         rowKey: id,
         title: (body.title !== undefined ? body.title : existing.title) || '',
-        status: (body.status !== undefined ? body.status : existing.status) || 'active',
+        status,
         createdAt: existing.createdAt || now,
         updatedAt: now
       };
+      // Preserve project linkage (this table also holds project-linked experiments).
+      if (existing.projectId) updated.projectId = existing.projectId;
 
       // Handle optional string fields - omit if empty
       const desc = body.description !== undefined ? body.description : (existing.description || '');
@@ -158,12 +161,16 @@ app.http('experimentsUpdate', {
       const purpose = body.purpose !== undefined ? body.purpose : (existing.purpose || '');
       const hypothesis = body.hypothesis !== undefined ? body.hypothesis : (existing.hypothesis || '');
       const scratchPad = body.scratch_pad !== undefined ? body.scratch_pad : (existing.scratchPad || '');
+      const concl = body.conclusion !== undefined ? body.conclusion : (existing.conclusion || '');
+      const failReason = body.failed_reason !== undefined ? body.failed_reason : (existing.failedReason || '');
 
       if (desc) updated.description = desc;
       if (tgs) updated.tags = tgs;
       if (purpose) updated.purpose = purpose;
       if (hypothesis) updated.hypothesis = hypothesis;
       if (scratchPad) updated.scratchPad = scratchPad;
+      if (concl) updated.conclusion = concl;
+      if (status === 'failed' && failReason) updated.failedReason = failReason;
 
       // Handle JSON array fields
       if (body.strains !== undefined) {

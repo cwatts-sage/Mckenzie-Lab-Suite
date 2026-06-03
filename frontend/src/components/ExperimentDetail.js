@@ -7,6 +7,8 @@ const STATUS_OPTIONS = [
   { value: 'active', label: '🟢 Active', color: '#27ae60' },
   { value: 'paused', label: '⏸️ Paused', color: '#f39c12' },
   { value: 'completed', label: '✅ Completed', color: '#3498db' },
+  { value: 'failed', label: '❌ Failed', color: '#e74c3c' },
+  { value: 'archived', label: '🗄️ Archived', color: '#95a5a6' },
   { value: 'abandoned', label: '🚫 Abandoned', color: '#95a5a6' },
 ];
 
@@ -154,6 +156,8 @@ function ExperimentDetail() {
       purpose: experiment.purpose || '',
       hypothesis: experiment.hypothesis || '',
       status: experiment.status,
+      conclusion: experiment.conclusion || '',
+      failed_reason: experiment.failed_reason || '',
       tags: experiment.tags || '',
       strains: experiment.strains || [],
       controls: experiment.controls || [],
@@ -570,6 +574,19 @@ function ExperimentDetail() {
           </div>
         </div>
 
+        {experiment.status === 'completed' && experiment.conclusion && (
+          <div style={{background:'#eaf2fb',border:'1px solid #d2e3f7',borderRadius:8,padding:'12px 16px',marginBottom:16}}>
+            <div style={{fontSize:'0.78rem',fontWeight:700,color:'#2c6fbf',textTransform:'uppercase',marginBottom:4}}>✅ Conclusion</div>
+            <div style={{fontSize:'0.9rem',color:'#333',whiteSpace:'pre-wrap',lineHeight:1.5}}>{experiment.conclusion}</div>
+          </div>
+        )}
+        {experiment.status === 'failed' && experiment.failed_reason && (
+          <div style={{background:'#fdecea',border:'1px solid #f5c6cb',borderRadius:8,padding:'12px 16px',marginBottom:16}}>
+            <div style={{fontSize:'0.78rem',fontWeight:700,color:'#c0392b',textTransform:'uppercase',marginBottom:4}}>❌ Failure Reason</div>
+            <div style={{fontSize:'0.9rem',color:'#333',whiteSpace:'pre-wrap',lineHeight:1.5}}>{experiment.failed_reason}</div>
+          </div>
+        )}
+
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
           {experiment.purpose && (
             <div>
@@ -823,6 +840,18 @@ function ExperimentDetail() {
                 <input value={editForm.tags} onChange={(e) => setEditForm({...editForm, tags: e.target.value})} placeholder="comma, separated, tags" />
               </div>
             </div>
+            {editForm.status === 'failed' && (
+              <div className="form-group">
+                <label>Failure Reason</label>
+                <input value={editForm.failed_reason} onChange={(e) => setEditForm({...editForm, failed_reason: e.target.value})} placeholder="e.g., technical error, contamination" />
+              </div>
+            )}
+            {editForm.status === 'completed' && (
+              <div className="form-group">
+                <label>✅ Conclusion</label>
+                <textarea value={editForm.conclusion} onChange={(e) => setEditForm({...editForm, conclusion: e.target.value})} rows={3} style={{resize:'vertical'}} placeholder="Summary of findings / outcome of this experiment..." />
+              </div>
+            )}
 
             {/* Strains picker */}
             <div className="form-group" style={{position:'relative'}}>

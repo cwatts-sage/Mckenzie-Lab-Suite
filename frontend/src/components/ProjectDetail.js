@@ -7,6 +7,8 @@ const STATUS_OPTIONS = [
   { value: 'active', label: '🟢 Active', color: '#27ae60' },
   { value: 'paused', label: '⏸️ Paused', color: '#f39c12' },
   { value: 'completed', label: '✅ Completed', color: '#3498db' },
+  { value: 'failed', label: '❌ Failed', color: '#e74c3c' },
+  { value: 'archived', label: '🗄️ Archived', color: '#95a5a6' },
   { value: 'abandoned', label: '🚫 Abandoned', color: '#95a5a6' },
 ];
 
@@ -148,13 +150,13 @@ function ProjectDetail() {
 
   // Experiments
   const openAddExperiment = () => {
-    setExpForm({ title: '', description: '', tags: '', status: 'active' });
+    setExpForm({ title: '', description: '', tags: '', status: 'active', conclusion: '', failed_reason: '' });
     setEditingExp(null);
     setShowExpModal(true);
   };
 
   const openEditExperiment = (exp) => {
-    setExpForm({ title: exp.title, description: exp.description || '', tags: exp.tags || '', status: exp.status || 'active' });
+    setExpForm({ title: exp.title, description: exp.description || '', tags: exp.tags || '', status: exp.status || 'active', conclusion: exp.conclusion || '', failed_reason: exp.failed_reason || '' });
     setEditingExp(exp);
     setShowExpModal(true);
   };
@@ -180,6 +182,23 @@ function ProjectDetail() {
       setLoading(true);
       fetchData();
     } catch (err) { alert(err.response?.data?.error || 'Failed to create replicate'); }
+  };
+
+  const handleToggleFailReplicate = async (expId, rep) => {
+    if (rep.failed) {
+      // Restore
+      try {
+        await replicateAPI.update(expId, rep.id, { failed: false });
+        setLoading(true); fetchData();
+      } catch (err) { alert(err.response?.data?.error || 'Failed to restore replicate'); }
+      return;
+    }
+    const reason = window.prompt(`Mark Replicate ${rep.replicate_number} as failed?\nOptional reason (technical error, contamination, etc.):`, '');
+    if (reason === null) return; // cancelled
+    try {
+      await replicateAPI.update(expId, rep.id, { failed: true, failed_reason: reason });
+      setLoading(true); fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to update replicate'); }
   };
 
   const handleDeleteReplicate = async (expId, rep) => {
@@ -598,14 +617,14 @@ function ProjectDetail() {
                     const reps = exp.replicates || [];
 
                     return (
-                      <div key={exp.id} style={{ border:'1px solid #eee', borderRadius:12, borderLeft:`4px solid ${expSi.color}`, overflow:'hidden' }}>
+                      <div key={exp.id} style={{ border:'1px solid #eee', borderRadius:12, borderLeft:`4px solid ${expSi.color}`, overflow:'hidden', opacity:(exp.status==='failed'||exp.status==='archived')?0.6:1 }}>
                         {/* Experiment Header */}
                         <div style={{ padding:16, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', background: isCollapsed ? 'white' : '#fafafa' }}
                           onClick={() => { const n = new Set(collapsedExps); isCollapsed ? n.delete(exp.id) : n.add(exp.id); setCollapsedExps(n); }}>
                           <div style={{display:'flex',alignItems:'center',gap:8,flex:1}}>
                             <span style={{color:'#888',fontSize:'0.9rem',transition:'transform 0.2s',transform:isCollapsed?'rotate(-90deg)':'rotate(0deg)'}}>▼</span>
-                            <h3 style={{fontSize:'1rem',margin:0}}>{exp.title}</h3>
-                            <span className={`badge badge-${exp.status === 'active' ? 'success' : 'info'}`} style={{fontSize:'0.7rem'}}>{expSi.label}</span>
+                            <h3 style={{fontSize:'1rem',margin:0,textDecoration:(exp.status==='failed'||exp.status==='archived')?'line-through':'none'}}>{exp.title}</h3>
+                            <span className={`badge badge-${exp.status === 'active' ? 'success' : exp.status === 'failed' ? 'danger' : 'info'}`} style={{fontSize:'0.7rem'}}>{expSi.label}</span>
                             <span style={{fontSize:'0.8rem',color:'#888'}}>🔁 {reps.length} rep{reps.length !== 1 ? 's' : ''}</span>
                             <span style={{fontSize:'0.8rem',color:'#999'}}>📓 {expEntries.length}</span>
                           </div>
@@ -621,6 +640,18 @@ function ProjectDetail() {
                         {!isCollapsed && (
                           <div style={{padding:'0 16px 16px'}}>
                             {exp.description && <p style={{color:'#666',fontSize:'0.85rem',marginBottom:12}}>{exp.description}</p>}
+                            {exp.status === 'completed' && exp.conclusion && (
+                              <div style={{background:'#eaf2fb',border:'1px solid #d2e3f7',borderRadius:8,padding:'10px 14px',marginBottom:12}}>
+                                <div style={{fontSize:'0.78rem',fontWeight:700,color:'#2c6fbf',textTransform:'uppercase',marginBottom:4}}>✅ Conclusion</div>
+                                <div style={{fontSize:'0.88rem',color:'#333',whiteSpace:'pre-wrap'}}>{exp.conclusion}</div>
+                              </div>
+                            )}
+                            {exp.status === 'failed' && exp.failed_reason && (
+                              <div style={{background:'#fdecea',border:'1px solid #f5c6cb',borderRadius:8,padding:'10px 14px',marginBottom:12}}>
+                                <div style={{fontSize:'0.78rem',fontWeight:700,color:'#c0392b',textTransform:'uppercase',marginBottom:4}}>❌ Failure Reason</div>
+                                <div style={{fontSize:'0.88rem',color:'#333',whiteSpace:'pre-wrap'}}>{exp.failed_reason}</div>
+                              </div>
+                            )}
 
                             {reps.length === 0 ? (
                               /* No replicates yet — show entries directly */
@@ -644,12 +675,13 @@ function ProjectDetail() {
                                 }, { oldest: null, newest: null }) : { oldest: null, newest: null };
 
                                 return (
-                                  <div key={rep.id} style={{marginBottom:12,border:'1px solid #eee',borderRadius:8,overflow:'hidden'}}>
-                                    <div style={{ padding:'10px 14px', background:'#f0f4f8', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}
+                                  <div key={rep.id} style={{marginBottom:12,border:'1px solid #eee',borderRadius:8,overflow:'hidden',opacity:rep.failed?0.6:1}}>
+                                    <div style={{ padding:'10px 14px', background:rep.failed?'#fdecea':'#f0f4f8', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' }}
                                       onClick={() => { const n = new Set(collapsedReps); isRepCollapsed ? n.delete(rep.id) : n.add(rep.id); setCollapsedReps(n); }}>
-                                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                                         <span style={{color:'#888',fontSize:'0.8rem',transition:'transform 0.2s',transform:isRepCollapsed?'rotate(-90deg)':'rotate(0deg)'}}>▼</span>
-                                        <strong style={{fontSize:'0.9rem'}}>🔁 Replicate {rep.replicate_number}</strong>
+                                        <strong style={{fontSize:'0.9rem',textDecoration:rep.failed?'line-through':'none'}}>🔁 Replicate {rep.replicate_number}</strong>
+                                        {rep.failed && <span className="badge badge-danger" style={{fontSize:'0.7rem'}} title={rep.failed_reason || 'Failed'}>❌ Failed</span>}
                                         <span style={{fontSize:'0.75rem',color:'#888'}}>
                                           {repDates.oldest ? `${new Date(repDates.oldest + 'T12:00:00').toLocaleDateString()} – ${new Date(repDates.newest + 'T12:00:00').toLocaleDateString()}` : 'No entries yet'}
                                         </span>
@@ -657,6 +689,7 @@ function ProjectDetail() {
                                       </div>
                                       <div onClick={(e) => e.stopPropagation()} style={{display:'flex',gap:4}}>
                                         <button className="btn btn-sm btn-secondary" onClick={() => openAddEntry(exp.id, rep.id)} style={{padding:'2px 8px',fontSize:'0.75rem'}}>+ Entry</button>
+                                        <button className="btn btn-sm btn-warning" onClick={() => handleToggleFailReplicate(exp.id, rep)} style={{padding:'2px 8px',fontSize:'0.75rem'}} title={rep.failed?'Restore replicate':'Mark as failed'}>{rep.failed?'↩️':'❌'}</button>
                                         <button className="btn btn-sm btn-danger" onClick={() => handleDeleteReplicate(exp.id, {...rep, entry_count: repEntries.length})} style={{padding:'2px 8px',fontSize:'0.75rem'}} title="Delete replicate">🗑️</button>
                                       </div>
                                     </div>
@@ -778,6 +811,12 @@ function ProjectDetail() {
               <div className="form-group"><label>Status</label><select value={expForm.status} onChange={(e) => setExpForm({...expForm, status: e.target.value})}>{STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
               <div className="form-group"><label>Tags</label><input value={expForm.tags} onChange={(e) => setExpForm({...expForm, tags: e.target.value})} placeholder="comma, separated, tags" /></div>
             </div>
+            {expForm.status === 'failed' && (
+              <div className="form-group"><label>Failure Reason</label><input value={expForm.failed_reason} onChange={(e) => setExpForm({...expForm, failed_reason: e.target.value})} placeholder="e.g., technical error, contamination" /></div>
+            )}
+            {expForm.status === 'completed' && (
+              <div className="form-group"><label>✅ Conclusion</label><textarea value={expForm.conclusion} onChange={(e) => setExpForm({...expForm, conclusion: e.target.value})} rows={3} style={{resize:'vertical'}} placeholder="Summary of findings / outcome of this experiment..." /></div>
+            )}
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowExpModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSaveExperiment}>{editingExp ? 'Save Changes' : 'Create'}</button>

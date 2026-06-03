@@ -91,6 +91,7 @@ export const projectAPI = {
 // Replicates
 export const replicateAPI = {
   create: (expId, data) => api.post(`/experiments/${expId}/replicates`, data || {}),
+  update: (expId, repId, data) => api.put(`/experiments/${expId}/replicates/${repId}`, data || {}),
   delete: (expId, repId) => api.delete(`/experiments/${expId}/replicates/${repId}`),
 };
 
