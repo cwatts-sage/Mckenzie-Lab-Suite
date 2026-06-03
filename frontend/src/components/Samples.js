@@ -14,6 +14,8 @@ function Samples() {
   const [projects, setProjects] = useState([]);
   const [filterUnit, setFilterUnit] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  // Default view shows stored + in use; depleted only when explicitly selected.
+  const [showDepleted, setShowDepleted] = useState(false);
   const [filterProject, setFilterProject] = useState('');
   const [filterExperiment, setFilterExperiment] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -49,7 +51,11 @@ function Samples() {
       const params = {};
       if (search) params.search = search;
       if (filterUnit) params.unit_id = filterUnit;
-      if (filterStatus) params.status = filterStatus;
+      if (filterStatus) {
+        params.status = filterStatus;
+      } else {
+        params.status = showDepleted ? 'stored,in use,depleted' : 'stored,in use';
+      }
       if (filterProject) params.project_id = filterProject;
       if (filterExperiment) params.experiment_id = filterExperiment;
 
@@ -71,7 +77,7 @@ function Samples() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterUnit, filterStatus, filterProject, filterExperiment]);
+  }, [search, filterUnit, filterStatus, filterProject, filterExperiment, showDepleted]);
 
   useEffect(() => {
     fetchData();
@@ -174,9 +180,11 @@ function Samples() {
     setExpDropdownOpen(false);
   };
 
-  const filteredExperiments = experiments.filter(e =>
-    !expSearch || (e.title || '').toLowerCase().includes(expSearch.toLowerCase())
-  );
+  // #13: only show experiments belonging to the selected project (if one is set).
+  const filteredExperiments = experiments.filter(e => {
+    if (form.project_id && e.project_id !== form.project_id) return false;
+    return !expSearch || (e.title || '').toLowerCase().includes(expSearch.toLowerCase());
+  });
 
   // Cross-reference view
   const toggleExpandSample = async (sample) => {
@@ -201,7 +209,6 @@ function Samples() {
     if (s.unit_name) parts.push(s.unit_name);
     if (s.rack) parts.push(`Rack ${s.rack}`);
     if (s.box) parts.push(`Box ${s.box}`);
-    if (s.position) parts.push(`Pos ${s.position}`);
     return parts.join(' → ') || '—';
   };
 
@@ -245,11 +252,17 @@ function Samples() {
             ))}
           </select>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-            <option value="">All Statuses</option>
+            <option value="">Default (Stored + In Use)</option>
             <option value="stored">Stored</option>
             <option value="in use">In Use</option>
             <option value="depleted">Depleted</option>
           </select>
+          {!filterStatus && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={showDepleted} onChange={(e) => setShowDepleted(e.target.checked)} />
+              Show Depleted
+            </label>
+          )}
         </div>
 
         {samples.length === 0 ? (
@@ -481,7 +494,7 @@ function Samples() {
                 <option value="">— Select location —</option>
                 {locations.map(l => (
                   <option key={l.id} value={l.id}>
-                    {l.unit_name} → {l.rack ? `Rack ${l.rack}` : ''}{l.box ? ` → Box ${l.box}` : ''}{l.position ? ` → Pos ${l.position}` : ''}
+                    {l.unit_name}{l.rack ? ` → Rack ${l.rack}` : ''}{l.box ? ` → Box ${l.box}` : ''}
                   </option>
                 ))}
               </select>

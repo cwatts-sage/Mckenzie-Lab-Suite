@@ -25,16 +25,30 @@ async function getLocationsMap(userId) {
   return map;
 }
 
+// Helper: get experiments/projects name map (both live in the 'experiments' table)
+async function getExpProjMap(userId) {
+  const table = await getTable('experiments');
+  const map = {};
+  const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${userId}'` } });
+  for await (const e of entities) {
+    map[e.rowKey] = { title: e.title || '', projectId: e.projectId || null };
+  }
+  return map;
+}
+
 // Helper: enrich sample with location info
-function enrichSample(s, locsMap, unitsMap) {
+function enrichSample(s, locsMap, unitsMap, expMap = {}) {
   const loc = locsMap[s.storageLocationId] || {};
   const unit = unitsMap[loc.storageUnitId] || {};
+  // Backfill experiment name from experiment_id if the stored string is empty (#12)
+  const expEntry = s.experimentId ? expMap[s.experimentId] : null;
+  const experimentName = s.experiment || (expEntry ? expEntry.title : null);
   return {
     id: s.rowKey,
     user_id: s.partitionKey,
     name: s.name,
     date_collected: s.dateCollected || null,
-    experiment: s.experiment || null,
+    experiment: experimentName || null,
     experiment_id: s.experimentId || null,
     project_id: s.projectId || null,
     project_name: s.projectName || null,
@@ -71,11 +85,12 @@ app.http('samplesGet', {
       const table = await getTable('samples');
       const locsMap = await getLocationsMap(decoded.id);
       const unitsMap = await getUnitsMap(decoded.id);
+      const expMap = await getExpProjMap(decoded.id);
 
       let samples = [];
       const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of entities) {
-        samples.push(enrichSample(entity, locsMap, unitsMap));
+        samples.push(enrichSample(entity, locsMap, unitsMap, expMap));
       }
 
       // Apply filters
@@ -99,7 +114,8 @@ app.http('samplesGet', {
       }
 
       if (status) {
-        samples = samples.filter(r => r.status === status);
+        const allowed = new Set(status.split(',').map(s => s.trim()).filter(Boolean));
+        samples = samples.filter(r => allowed.has(r.status || 'stored'));
       }
 
       const experimentId = req.query.get('experiment_id');

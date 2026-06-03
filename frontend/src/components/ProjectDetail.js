@@ -30,6 +30,7 @@ function ProjectDetail() {
 
   // View mode: 'experiments' or 'all-entries'
   const [viewMode, setViewMode] = useState('experiments');
+  const [entrySearch, setEntrySearch] = useState('');
   const [entryTypeFilter, setEntryTypeFilter] = useState('');
 
   // Edit project modal
@@ -179,6 +180,19 @@ function ProjectDetail() {
       setLoading(true);
       fetchData();
     } catch (err) { alert(err.response?.data?.error || 'Failed to create replicate'); }
+  };
+
+  const handleDeleteReplicate = async (expId, rep) => {
+    const n = rep.entry_count || 0;
+    const msg = n > 0
+      ? `Delete Replicate ${rep.replicate_number}? Its ${n} entr${n === 1 ? 'y' : 'ies'} will be unassigned (not deleted).`
+      : `Delete Replicate ${rep.replicate_number}?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await replicateAPI.delete(expId, rep.id);
+      setLoading(true);
+      fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to delete replicate'); }
   };
 
   // Entries
@@ -641,8 +655,9 @@ function ProjectDetail() {
                                         </span>
                                         <span style={{fontSize:'0.75rem',color:'#999'}}>({repEntries.length} entries)</span>
                                       </div>
-                                      <div onClick={(e) => e.stopPropagation()}>
+                                      <div onClick={(e) => e.stopPropagation()} style={{display:'flex',gap:4}}>
                                         <button className="btn btn-sm btn-secondary" onClick={() => openAddEntry(exp.id, rep.id)} style={{padding:'2px 8px',fontSize:'0.75rem'}}>+ Entry</button>
+                                        <button className="btn btn-sm btn-danger" onClick={() => handleDeleteReplicate(exp.id, {...rep, entry_count: repEntries.length})} style={{padding:'2px 8px',fontSize:'0.75rem'}} title="Delete replicate">🗑️</button>
                                       </div>
                                     </div>
                                     {!isRepCollapsed && (
@@ -692,15 +707,29 @@ function ProjectDetail() {
             </div>
           ) : (
             /* All Entries view */
+            (() => {
+              const q = entrySearch.trim().toLowerCase();
+              const searchedEntries = q
+                ? entries.filter(e =>
+                    (e.title || '').toLowerCase().includes(q) ||
+                    (e.content || '').toLowerCase().includes(q) ||
+                    (e.entry_type || '').toLowerCase().includes(q)
+                  )
+                : entries;
+              return (
             <div className="card">
               <div className="card-header">
-                <h2 style={{fontSize:'1.1rem'}}>📓 All Entries ({entries.length})</h2>
+                <h2 style={{fontSize:'1.1rem'}}>📓 All Entries ({searchedEntries.length}{q ? ` of ${entries.length}` : ''})</h2>
                 <button className="btn btn-primary" onClick={() => openAddEntry('', '')}>+ New Entry</button>
               </div>
-              {entries.length === 0 ? (
-                <div className="empty-state"><div className="emoji">📓</div><p>No entries yet.</p></div>
+              <div className="search-bar" style={{marginBottom:12}}>
+                <input type="text" placeholder="Search entries by title, content, or type..." value={entrySearch} onChange={(e) => setEntrySearch(e.target.value)} />
+                {entrySearch && <button className="btn btn-secondary" onClick={() => setEntrySearch('')}>Clear</button>}
+              </div>
+              {searchedEntries.length === 0 ? (
+                <div className="empty-state"><div className="emoji">📓</div><p>{q ? 'No entries match your search.' : 'No entries yet.'}</p></div>
               ) : (
-                groupByDate(entries).map(([date, dateEntries]) => (
+                groupByDate(searchedEntries).map(([date, dateEntries]) => (
                   <div key={date} style={{marginBottom:16}}>
                     <h3 style={{fontSize:'0.95rem',color:'#2c3e50',marginBottom:8,borderBottom:'1px solid #eee',paddingBottom:6}}>
                       📅 {date === 'No date' ? date : new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
@@ -711,6 +740,8 @@ function ProjectDetail() {
                 ))
               )}
             </div>
+              );
+            })()
           )}
         </div>
       </div>

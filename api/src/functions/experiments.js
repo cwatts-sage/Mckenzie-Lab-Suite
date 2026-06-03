@@ -8,12 +8,14 @@ function formatExperiment(entity) {
   const result = {
     id: entity.rowKey,
     title: entity.title || '',
+    project_id: entity.projectId || null,
     description: entity.description || '',
     purpose: entity.purpose || '',
     hypothesis: entity.hypothesis || '',
     strains: entity.strains ? JSON.parse(entity.strains) : [],
     controls: entity.controls ? JSON.parse(entity.controls) : [],
     scratch_pad: entity.scratchPad || '',
+    conclusion: entity.conclusion || '',
     status: entity.status || 'active',
     tags: entity.tags || '',
     created_at: entity.createdAt,
@@ -36,6 +38,9 @@ app.http('experimentsGet', {
       const items = [];
       const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of entities) {
+        // Only return actual experiments (rows with a projectId); rows without one
+        // are projects (same table). Prevents projects showing in experiment pickers.
+        if (!entity.projectId) continue;
         items.push(formatExperiment(entity));
       }
       items.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
