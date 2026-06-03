@@ -93,6 +93,22 @@ export const archiveAPI = {
   getAll: () => api.get('/archive'),
 };
 
+// Drosophila Manager
+export const flyAPI = {
+  getBoxes: () => api.get('/fly/boxes'),
+  createBox: (data) => api.post('/fly/boxes', data),
+  updateBox: (id, data) => api.put(`/fly/boxes/${id}`, data),
+  deleteBox: (id) => api.delete(`/fly/boxes/${id}`),
+  getVials: (params) => api.get('/fly/vials', { params }),
+  getVial: (id) => api.get(`/fly/vials/${id}`),
+  createVial: (data) => api.post('/fly/vials', data),
+  updateVial: (id, data) => api.put(`/fly/vials/${id}`, data),
+  flipVial: (id, data) => api.post(`/fly/vials/${id}/flip`, data || {}),
+  deleteVial: (id) => api.delete(`/fly/vials/${id}`),
+  addObservation: (vialId, data) => api.post(`/fly/vials/${vialId}/observations`, data),
+  deleteObservation: (vialId, obsId) => api.delete(`/fly/vials/${vialId}/observations/${obsId}`),
+};
+
 // Replicates
 export const replicateAPI = {
   create: (expId, data) => api.post(`/experiments/${expId}/replicates`, data || {}),

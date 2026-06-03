@@ -18,6 +18,7 @@ import ProjectDetail from './components/ProjectDetail';
 import Notes from './components/Notes';
 import Trash from './components/Trash';
 import Archive from './components/Archive';
+import Flies from './components/Flies';
 import './App.css';
 
 function SubNav() {
@@ -75,6 +76,9 @@ function AppContent({ user, setUser, handleLogout }) {
           <NavLink to="/notebook" className={({ isActive }) => `nav-link ${isActive || location.pathname.startsWith('/notebook') ? 'active' : ''}`}>
             📓 Notebook
           </NavLink>
+          <NavLink to="/flies" className={({ isActive }) => `nav-link ${isActive || location.pathname.startsWith('/flies') ? 'active' : ''}`}>
+            🪰 Flies
+          </NavLink>
         </div>
         <div className="nav-right">
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
@@ -106,6 +110,7 @@ function AppContent({ user, setUser, handleLogout }) {
           <Route path="/notebook/experiments/:id" element={<ExperimentDetail />} />
           <Route path="/notebook/notes" element={<Notes />} />
           <Route path="/notebook/archive" element={<Archive />} />
+          <Route path="/flies" element={<Flies />} />
           <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
           {user.is_admin && <Route path="/admin" element={<Admin />} />}
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -75,6 +75,26 @@ function Hub({ user }) {
           )}
           <div className="hub-card-action">Open →</div>
         </div>
+
+        {/* Flies Card */}
+        <div className="hub-card" onClick={() => navigate('/flies')}>
+          <div className="hub-card-icon">🪰</div>
+          <h3>Drosophila Manager</h3>
+          <p className="hub-card-desc">Track fly tubes, flips & predicted stages</p>
+          {loading ? (
+            <div className="hub-card-stats">Loading...</div>
+          ) : summary && summary.flies ? (
+            <div className="hub-card-stats">
+              <span>🧪 {summary.flies.tube_count || 0} tube{(summary.flies.tube_count || 0) !== 1 ? 's' : ''}</span>
+              {summary.flies.attention_count > 0 && (
+                <span className="hub-stat-alert">⏰ {summary.flies.attention_count} need attention</span>
+              )}
+            </div>
+          ) : (
+            <div className="hub-card-stats">—</div>
+          )}
+          <div className="hub-card-action">Open →</div>
+        </div>
       </div>
     </div>
   );

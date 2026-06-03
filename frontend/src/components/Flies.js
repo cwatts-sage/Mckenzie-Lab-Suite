@@ -1,0 +1,345 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { flyAPI } from '../api';
+import DeleteConfirmModal from './DeleteConfirmModal';
+
+const STAGES = [
+  { value: 'new_tube', label: '🆕 New tube', short: 'New' },
+  { value: 'L3', label: '🐛 L3', short: 'L3' },
+  { value: 'wandering_L3', label: '🚶 Wandering L3', short: 'Wand. L3' },
+  { value: 'pupa', label: '🛡️ Pupa', short: 'Pupa' },
+  { value: 'new_adults', label: '🪰 New adults', short: 'Adults' },
+];
+const stageLabel = (v) => (STAGES.find(s => s.value === v) || {}).short || v;
+
+const todayStr = () => new Date().toISOString().split('T')[0];
+
+function Flies() {
+  const [vials, setVials] = useState([]);
+  const [boxes, setBoxes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const [showVialModal, setShowVialModal] = useState(false);
+  const [editingVial, setEditingVial] = useState(null);
+  const [vialForm, setVialForm] = useState(emptyVialForm());
+
+  const [showBoxModal, setShowBoxModal] = useState(false);
+  const [editingBox, setEditingBox] = useState(null);
+  const [boxForm, setBoxForm] = useState({ name: '', temperature: 22, notes: '' });
+
+  const [obsVial, setObsVial] = useState(null); // vial we're logging an observation for
+  const [obsDate, setObsDate] = useState(todayStr());
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  function emptyVialForm() {
+    return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: todayStr(), flip_interval_days: 21 };
+  }
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [vialsRes, boxesRes] = await Promise.all([flyAPI.getVials(), flyAPI.getBoxes()]);
+      setVials(vialsRes.data);
+      setBoxes(boxesRes.data);
+    } catch (err) {
+      setError('Failed to load: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ----- Vial CRUD -----
+  const openAddVial = () => { setEditingVial(null); setVialForm({ ...emptyVialForm(), box_id: boxes[0]?.id || '' }); setShowVialModal(true); };
+  const openEditVial = (v) => {
+    setEditingVial(v);
+    setVialForm({ name: v.name, type: v.type, genotype: v.genotype || '', box_id: v.box_id || '', target_stage: v.target_stage || 'L3', start_date: v.start_date || todayStr(), flip_interval_days: v.flip_interval_days || 21 });
+    setShowVialModal(true);
+  };
+  const saveVial = async () => {
+    if (!vialForm.name.trim()) { alert('Name is required'); return; }
+    try {
+      if (editingVial) await flyAPI.updateVial(editingVial.id, vialForm);
+      else await flyAPI.createVial(vialForm);
+      setShowVialModal(false); setLoading(true); fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to save'); }
+  };
+  const doDeleteVial = async () => {
+    try { await flyAPI.deleteVial(deleteTarget.id); setDeleteTarget(null); fetchData(); }
+    catch (err) { alert('Failed to delete'); }
+  };
+  const flipStock = async (v) => {
+    if (!window.confirm(`Flip "${v.name}" today? Next flip will be scheduled in ${v.flip_interval_days || 21} days.`)) return;
+    try { await flyAPI.flipVial(v.id, { flip_date: todayStr() }); setLoading(true); fetchData(); }
+    catch (err) { alert('Failed to flip'); }
+  };
+
+  // ----- Observations -----
+  const logObservation = async (vialId, stage) => {
+    try {
+      await flyAPI.addObservation(vialId, { stage_seen: stage, observed_at: obsDate });
+      setObsVial(null); setObsDate(todayStr()); setLoading(true); fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to log'); }
+  };
+
+  // ----- Boxes -----
+  const openAddBox = () => { setEditingBox(null); setBoxForm({ name: '', temperature: 22, notes: '' }); setShowBoxModal(true); };
+  const openEditBox = (b) => { setEditingBox(b); setBoxForm({ name: b.name, temperature: b.temperature, notes: b.notes || '' }); setShowBoxModal(true); };
+  const saveBox = async () => {
+    if (!boxForm.name.trim()) { alert('Box name required'); return; }
+    try {
+      if (editingBox) await flyAPI.updateBox(editingBox.id, boxForm);
+      else await flyAPI.createBox(boxForm);
+      setShowBoxModal(false); setLoading(true); fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to save box'); }
+  };
+  const deleteBox = async (b) => {
+    const inUse = vials.filter(v => v.box_id === b.id).length;
+    if (inUse > 0) { alert(`Can't delete "${b.name}" — ${inUse} tube(s) still in it. Move them first.`); return; }
+    if (!window.confirm(`Delete box "${b.name}"?`)) return;
+    try { await flyAPI.deleteBox(b.id); setLoading(true); fetchData(); }
+    catch (err) { alert('Failed to delete box'); }
+  };
+
+  // ----- Attention helpers -----
+  const flipDueInfo = (v) => {
+    if (v.type !== 'stock' || !v.next_flip_date) return null;
+    const days = Math.ceil((new Date(v.next_flip_date + 'T12:00:00') - new Date()) / 86400000);
+    return { days, date: v.next_flip_date };
+  };
+  const predBadge = (p) => {
+    if (!p) return null;
+    const color = { high: '#27ae60', medium: '#e67e22', low: '#95a5a6' }[p.confidence] || '#95a5a6';
+    return <span style={{ background: '#f4f6f8', color, border: `1px solid ${color}`, padding: '2px 8px', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>{stageLabel(p.predicted_stage)}</span>;
+  };
+
+  if (loading) return <div className="loading">Loading flies...</div>;
+  if (error) return <div className="card"><div style={{ color: '#e74c3c', padding: 20 }}>{error}</div></div>;
+
+  // Group vials by box
+  const byBox = {};
+  vials.forEach(v => { const k = v.box_id || 'unassigned'; (byBox[k] = byBox[k] || []).push(v); });
+
+  // Attention list
+  const attention = [];
+  vials.forEach(v => {
+    const fd = flipDueInfo(v);
+    if (fd && fd.days <= 3) attention.push({ vial: v, kind: 'flip', text: fd.days < 0 ? `Flip overdue (${-fd.days}d)` : fd.days === 0 ? 'Flip due today' : `Flip in ${fd.days}d` });
+    if (v.type === 'cross' && v.prediction) {
+      const p = v.prediction;
+      if (p.eta_to_target_days != null && p.eta_to_target_days <= 1.5 && p.eta_to_target_days >= -2)
+        attention.push({ vial: v, kind: 'target', text: p.eta_to_target_days <= 0 ? `${stageLabel(p.target_stage)} window open now` : `${stageLabel(p.target_stage)} in ~${p.eta_to_target_days}d` });
+      if (p.clear_parents_in_days != null && p.clear_parents_in_days <= 2 && p.clear_parents_in_days >= -3)
+        attention.push({ vial: v, kind: 'parents', text: p.clear_parents_in_days <= 0 ? '⚠️ Clear parents now!' : `Clear parents in ~${p.clear_parents_in_days}d` });
+    }
+  });
+
+  return (
+    <div>
+      {/* Attention */}
+      <div className="card">
+        <div className="card-header">
+          <h2>🪰 Drosophila Manager ({vials.length} tube{vials.length !== 1 ? 's' : ''})</h2>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={openAddBox}>+ Box</button>
+            <button className="btn btn-primary" onClick={openAddVial} disabled={boxes.length === 0}>+ Tube</button>
+          </div>
+        </div>
+        {boxes.length === 0 && (
+          <div className="empty-state"><div className="emoji">📦</div><p>Add a box first (with its temperature), then start adding tubes.</p></div>
+        )}
+        {attention.length > 0 && (
+          <div style={{ background: '#fff8e1', border: '1px solid #ffe0a3', borderRadius: 8, padding: '10px 14px', marginTop: 8 }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b9770e', textTransform: 'uppercase', marginBottom: 6 }}>⏰ Needs attention</div>
+            {attention.map((a, i) => (
+              <div key={i} style={{ fontSize: '0.88rem', padding: '3px 0', display: 'flex', gap: 8 }}>
+                <strong>{a.vial.name}</strong>
+                <span style={{ color: a.kind === 'parents' ? '#c0392b' : '#555' }}>{a.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Boxes & tubes */}
+      {boxes.map(box => {
+        const tubes = byBox[box.id] || [];
+        return (
+          <div className="card" key={box.id}>
+            <div className="card-header">
+              <h3 style={{ fontSize: '1.05rem', margin: 0 }}>📦 {box.name} <span style={{ fontSize: '0.85rem', color: '#888', fontWeight: 400 }}>· {box.temperature}°C · {tubes.length} tube{tubes.length !== 1 ? 's' : ''}</span></h3>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-sm btn-secondary" onClick={() => openEditBox(box)}>✏️</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => deleteBox(box)}>🗑️</button>
+              </div>
+            </div>
+            {tubes.length === 0 ? (
+              <div style={{ color: '#999', fontSize: '0.88rem', padding: 8 }}>No tubes in this box yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {tubes.map(v => renderTube(v))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {(byBox.unassigned || []).length > 0 && (
+        <div className="card">
+          <div className="card-header"><h3 style={{ fontSize: '1.05rem', margin: 0 }}>❔ Unassigned</h3></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{byBox.unassigned.map(v => renderTube(v))}</div>
+        </div>
+      )}
+
+      {/* Vial Modal */}
+      {showVialModal && (
+        <div className="modal-overlay" onClick={() => setShowVialModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h2>{editingVial ? 'Edit Tube' : 'New Tube'}</h2>
+            <div className="form-row">
+              <div className="form-group"><label>Name *</label><input value={vialForm.name} onChange={(e) => setVialForm({ ...vialForm, name: e.target.value })} autoFocus placeholder="e.g., w1118 × Arc1-GAL4" /></div>
+              <div className="form-group"><label>Type</label>
+                <select value={vialForm.type} onChange={(e) => setVialForm({ ...vialForm, type: e.target.value })}>
+                  <option value="cross">⚗️ Cross</option>
+                  <option value="stock">🧪 Stock</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group"><label>Genotype / strain</label><input value={vialForm.genotype} onChange={(e) => setVialForm({ ...vialForm, genotype: e.target.value })} placeholder="optional" /></div>
+            <div className="form-row">
+              <div className="form-group"><label>Box</label>
+                <select value={vialForm.box_id} onChange={(e) => setVialForm({ ...vialForm, box_id: e.target.value })}>
+                  <option value="">— Select box —</option>
+                  {boxes.map(b => <option key={b.id} value={b.id}>{b.name} ({b.temperature}°C)</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label>{vialForm.type === 'cross' ? 'Parents set on' : 'Started on'}</label><input type="date" value={vialForm.start_date} onChange={(e) => setVialForm({ ...vialForm, start_date: e.target.value })} /></div>
+            </div>
+            {vialForm.type === 'cross' ? (
+              <div className="form-group"><label>Target stage to catch</label>
+                <select value={vialForm.target_stage} onChange={(e) => setVialForm({ ...vialForm, target_stage: e.target.value })}>
+                  {STAGES.filter(s => s.value !== 'new_tube').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="form-group"><label>Flip every (days)</label><input type="number" value={vialForm.flip_interval_days} onChange={(e) => setVialForm({ ...vialForm, flip_interval_days: e.target.value })} /></div>
+            )}
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowVialModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveVial}>{editingVial ? 'Save' : 'Create'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Box Modal */}
+      {showBoxModal && (
+        <div className="modal-overlay" onClick={() => setShowBoxModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h2>{editingBox ? 'Edit Box' : 'New Box'}</h2>
+            <div className="form-group"><label>Name *</label><input value={boxForm.name} onChange={(e) => setBoxForm({ ...boxForm, name: e.target.value })} autoFocus placeholder="e.g., Bench box 1" /></div>
+            <div className="form-group"><label>Temperature (°C)</label><input type="number" step="any" value={boxForm.temperature} onChange={(e) => setBoxForm({ ...boxForm, temperature: e.target.value })} /><small style={{ color: '#999' }}>Room temp ≈ 22°C. Drives stage predictions.</small></div>
+            <div className="form-group"><label>Notes</label><input value={boxForm.notes} onChange={(e) => setBoxForm({ ...boxForm, notes: e.target.value })} /></div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowBoxModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveBox}>{editingBox ? 'Save' : 'Create'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Observation logger */}
+      {obsVial && (
+        <div className="modal-overlay" onClick={() => setObsVial(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <h2>Log observation</h2>
+            <p style={{ color: '#666', marginBottom: 12 }}><strong>{obsVial.name}</strong> — what do you see today?</p>
+            <div className="form-group"><label>Date</label><input type="date" value={obsDate} onChange={(e) => setObsDate(e.target.value)} /></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              {STAGES.map(s => (
+                <button key={s.value} className="btn btn-secondary" style={{ justifyContent: 'flex-start', fontSize: '1rem', padding: '10px 14px' }} onClick={() => logObservation(obsVial.id, s.value)}>{s.label}</button>
+              ))}
+            </div>
+            <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setObsVial(null)}>Cancel</button></div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <DeleteConfirmModal itemName={`tube "${deleteTarget.name}" and its observations`} onConfirm={doDeleteVial} onCancel={() => setDeleteTarget(null)} />
+      )}
+    </div>
+  );
+
+  function renderTube(v) {
+    const isOpen = expanded === v.id;
+    const p = v.prediction;
+    const fd = flipDueInfo(v);
+    return (
+      <div key={v.id} style={{ border: '1px solid #eee', borderRadius: 10, padding: 12, borderLeft: `4px solid ${v.type === 'cross' ? '#9b59b6' : '#16a085'}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong>{v.type === 'cross' ? '⚗️' : '🧪'} {v.name}</strong>
+              {v.type === 'cross' && predBadge(p)}
+              {v.type === 'stock' && fd && <span style={{ fontSize: '0.78rem', color: fd.days <= 0 ? '#c0392b' : fd.days <= 3 ? '#e67e22' : '#888' }}>🔄 {fd.days < 0 ? `overdue ${-fd.days}d` : fd.days === 0 ? 'flip today' : `flip in ${fd.days}d`}</span>}
+            </div>
+            {v.genotype && <div style={{ fontSize: '0.8rem', color: '#888' }}>{v.genotype}</div>}
+            {v.type === 'cross' && p && (
+              <div style={{ fontSize: '0.8rem', color: '#666', marginTop: 2 }}>
+                {p.eta_to_target_days != null && <span>🎯 {stageLabel(p.target_stage)} {p.eta_to_target_days <= 0 ? 'now' : `~${p.eta_to_target_days}d`}</span>}
+                {p.clear_parents_in_days != null && <span style={{ marginLeft: 10, color: p.clear_parents_in_days <= 2 ? '#c0392b' : '#666' }}>👪 clear parents {p.clear_parents_in_days <= 0 ? 'now' : `~${p.clear_parents_in_days}d`}</span>}
+                {p.speed_vs_standard != null && <span style={{ marginLeft: 10, color: '#999' }}>· {p.speed_vs_standard}× standard</span>}
+                <span style={{ marginLeft: 10, color: '#bbb' }}>({p.mode})</span>
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {v.type === 'cross' && <button className="btn btn-sm btn-primary" onClick={() => { setObsDate(todayStr()); setObsVial(v); }}>👁️ Log</button>}
+            {v.type === 'stock' && <button className="btn btn-sm btn-primary" onClick={() => flipStock(v)}>🔄 Flip</button>}
+            <button className="btn btn-sm btn-secondary" onClick={() => setExpanded(isOpen ? null : v.id)}>{isOpen ? '▲' : '▼'}</button>
+            <button className="btn btn-sm btn-secondary" onClick={() => openEditVial(v)}>✏️</button>
+            <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>🗑️</button>
+          </div>
+        </div>
+        {isOpen && (
+          <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 10, fontSize: '0.85rem' }}>
+            <div style={{ color: '#888' }}>{v.type === 'cross' ? 'Parents set' : 'Started'}: {v.start_date || '—'}{p && ` · ${p.elapsed_days}d elapsed`}</div>
+            {v.type === 'cross' && (
+              <ObservationsList vialId={v.id} onChanged={() => { setLoading(true); fetchData(); }} />
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+}
+
+// Lazy-load observations on expand
+function ObservationsList({ vialId, onChanged }) {
+  const [obs, setObs] = useState(null);
+  useEffect(() => {
+    let active = true;
+    flyAPI.getVial(vialId).then(res => { if (active) setObs(res.data.observations || []); }).catch(() => setObs([]));
+    return () => { active = false; };
+  }, [vialId]);
+  const del = async (o) => {
+    if (!window.confirm('Delete this observation?')) return;
+    try { await flyAPI.deleteObservation(vialId, o.id); onChanged(); } catch (e) { alert('Failed'); }
+  };
+  if (obs === null) return <div style={{ color: '#aaa', marginTop: 6 }}>Loading observations…</div>;
+  if (obs.length === 0) return <div style={{ color: '#aaa', marginTop: 6 }}>No observations logged yet.</div>;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontWeight: 600, color: '#666', marginBottom: 4 }}>Observations</div>
+      {obs.map(o => (
+        <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+          <span>{stageLabel(o.stage_seen)} <span style={{ color: '#999' }}>· {(o.observed_at || '').split('T')[0]}</span></span>
+          <span style={{ color: '#e74c3c', cursor: 'pointer' }} onClick={() => del(o)}>×</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default Flies;
