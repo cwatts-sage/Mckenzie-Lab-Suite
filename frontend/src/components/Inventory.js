@@ -10,6 +10,8 @@ function Inventory() {
   const [search, setSearch] = useState('');
   const [filterUnit, setFilterUnit] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
+  // Default view shows stored + in use; depleted only when explicitly selected.
+  const [showDepleted, setShowDepleted] = useState(false);
   const [catalogItems, setCatalogItems] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [showCatalogPicker, setShowCatalogPicker] = useState(false);
@@ -22,7 +24,8 @@ function Inventory() {
   function getEmptyForm() {
     return {
       name: '', catalog_number: '', lot_number: '', vendor: '', source_url: '',
-      storage_location_id: '', special_conditions: '',
+      storage_location_id: '', special_conditions: '', concentration: '', notes: '',
+      status: 'stored',
       quantity: '', quantity_unit: '', expiration_date: '', alert_days_before: ''
     };
   }
@@ -33,6 +36,7 @@ function Inventory() {
       if (search) params.search = search;
       if (filterUnit) params.unit_id = filterUnit;
       if (filterLowStock) params.low_stock = 'true';
+      params.status = showDepleted ? 'stored,in use,depleted' : 'stored,in use';
 
       const [reagentsRes, unitsRes, locsRes, catalogRes] = await Promise.all([
         reagentAPI.getAll(params),
@@ -50,7 +54,7 @@ function Inventory() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterUnit, filterLowStock]);
+  }, [search, filterUnit, filterLowStock, showDepleted]);
 
   useEffect(() => {
     fetchData();
@@ -72,6 +76,9 @@ function Inventory() {
       source_url: reagent.source_url || '',
       storage_location_id: reagent.storage_location_id || '',
       special_conditions: reagent.special_conditions || '',
+      concentration: reagent.concentration || '',
+      notes: reagent.notes || '',
+      status: reagent.status || 'stored',
       quantity: reagent.quantity ?? '',
       quantity_unit: reagent.quantity_unit || '',
       expiration_date: reagent.expiration_date || '',
@@ -125,7 +132,6 @@ function Inventory() {
     if (r.unit_name) parts.push(r.unit_name);
     if (r.rack) parts.push(`Rack ${r.rack}`);
     if (r.box) parts.push(`Box ${r.box}`);
-    if (r.position) parts.push(`Pos ${r.position}`);
     return parts.join(' → ') || '—';
   };
 
@@ -170,6 +176,10 @@ function Inventory() {
             <input type="checkbox" checked={filterLowStock} onChange={(e) => setFilterLowStock(e.target.checked)} />
             Low Stock Only
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={showDepleted} onChange={(e) => setShowDepleted(e.target.checked)} />
+            Show Depleted
+          </label>
         </div>
 
         {reagents.length === 0 ? (
@@ -183,12 +193,9 @@ function Inventory() {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Catalog #</th>
-                  <th>Vendor</th>
                   <th>Location</th>
                   <th>Qty</th>
                   <th>Expires</th>
-                  <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -202,9 +209,11 @@ function Inventory() {
                         {r.source_url && (
                           <> <a href={r.source_url} target="_blank" rel="noopener noreferrer" style={{fontSize:'0.8rem'}}>🔗</a></>
                         )}
+                        {r.status === 'depleted' && <span className="badge" style={{marginLeft:6, background:'#fdedec', color:'#e74c3c'}}>Depleted</span>}
+                        {r.status === 'in use' && <span className="badge" style={{marginLeft:6, background:'#fef5e7', color:'#e67e22'}}>In Use</span>}
+                        {r.is_low_stock ? <span className="badge badge-warning" style={{marginLeft:4}}>Low Stock</span> : null}
+                        {r.is_ordered ? <span className="badge badge-info" style={{marginLeft:4}}>Ordered</span> : null}
                       </td>
-                      <td>{r.catalog_number || '—'}</td>
-                      <td>{r.vendor || '—'}</td>
                       <td style={{fontSize:'0.85rem'}}>{formatLocation(r)}</td>
                       <td>{r.quantity != null ? `${r.quantity} ${r.quantity_unit || ''}` : '—'}</td>
                       <td>
@@ -214,10 +223,6 @@ function Inventory() {
                             {expStatus && <span className={`badge ${expStatus.class}`} style={{marginLeft:6}}>{expStatus.text}</span>}
                           </span>
                         ) : '—'}
-                      </td>
-                      <td>
-                        {r.is_low_stock ? <span className="badge badge-warning">Low Stock</span> : null}
-                        {r.is_ordered ? <span className="badge badge-info" style={{marginLeft:4}}>Ordered</span> : null}
                       </td>
                       <td>
                         <button className="btn btn-sm btn-secondary" onClick={() => openEdit(r)} style={{marginRight:4}}>Edit</button>
@@ -268,21 +273,43 @@ function Inventory() {
               </div>
             </div>
 
-            <div className="form-group">
-              <label>Storage Location</label>
-              <select value={form.storage_location_id} onChange={(e) => setForm({...form, storage_location_id: e.target.value})}>
-                <option value="">— Select location —</option>
-                {locations.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.unit_name} → {l.rack ? `Rack ${l.rack}` : ''}{l.box ? ` → Box ${l.box}` : ''}{l.position ? ` → Pos ${l.position}` : ''}
-                  </option>
-                ))}
-              </select>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Status</label>
+                <select value={form.status} onChange={(e) => setForm({...form, status: e.target.value})}>
+                  <option value="stored">Stored</option>
+                  <option value="in use">In Use</option>
+                  <option value="depleted">Depleted</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Storage Location</label>
+                <select value={form.storage_location_id} onChange={(e) => setForm({...form, storage_location_id: e.target.value})} disabled={form.status === 'depleted'}>
+                  <option value="">— Select location —</option>
+                  {locations.map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.unit_name}{l.rack ? ` → Rack ${l.rack}` : ''}{l.box ? ` → Box ${l.box}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {form.status === 'depleted' && <small style={{color:'#999'}}>Location cleared when depleted</small>}
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Concentration</label>
+                <input value={form.concentration} onChange={(e) => setForm({...form, concentration: e.target.value})} placeholder="e.g., 1 mg/mL, 1:1000" />
+              </div>
+              <div className="form-group">
+                <label>Special Conditions</label>
+                <input value={form.special_conditions} onChange={(e) => setForm({...form, special_conditions: e.target.value})} placeholder="e.g., Light-sensitive" />
+              </div>
             </div>
 
             <div className="form-group">
-              <label>Special Conditions</label>
-              <input value={form.special_conditions} onChange={(e) => setForm({...form, special_conditions: e.target.value})} placeholder="e.g., Light-sensitive, keep desiccated" />
+              <label>Notes</label>
+              <textarea value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} rows={2} style={{resize:'vertical'}} placeholder="Notes — useful for antibodies, lab-made reagents, dilutions..." />
             </div>
 
             <div className="form-row">
@@ -298,7 +325,7 @@ function Inventory() {
 
             <div className="form-row">
               <div className="form-group">
-                <label>Expiration Date</label>
+                <label>Expiration Date {form.expiration_date && <button type="button" onClick={() => setForm({...form, expiration_date: ''})} style={{marginLeft:8, fontSize:'0.75rem', background:'none', border:'none', color:'#3498db', cursor:'pointer', padding:0}}>clear</button>}</label>
                 <input type="date" value={form.expiration_date} onChange={(e) => setForm({...form, expiration_date: e.target.value})} />
               </div>
               <div className="form-group">

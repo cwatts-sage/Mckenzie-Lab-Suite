@@ -37,8 +37,8 @@ function SubNav() {
   if (location.pathname.startsWith('/notebook')) {
     return (
       <div className="sub-nav">
-        <NavLink to="/notebook" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📝 Entries</NavLink>
         <NavLink to="/notebook/projects" className={({ isActive }) => isActive || location.pathname.startsWith('/notebook/projects') ? 'sub-nav-link active' : 'sub-nav-link'}>📁 Projects</NavLink>
+        <NavLink to="/notebook" end className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📝 Entries</NavLink>
         <NavLink to="/notebook/notes" className={({ isActive }) => isActive ? 'sub-nav-link active' : 'sub-nav-link'}>📝 Notes</NavLink>
       </div>
     );

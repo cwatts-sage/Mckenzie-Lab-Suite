@@ -39,6 +39,10 @@ function enrichReagent(r, locsMap, unitsMap) {
     source_url: r.sourceUrl || null,
     storage_location_id: r.storageLocationId || null,
     special_conditions: r.specialConditions || null,
+    concentration: r.concentration || null,
+    notes: r.notes || null,
+    status: r.status || 'stored',
+    derived_from_id: r.derivedFromId || null,
     quantity: r.quantity ?? null,
     quantity_unit: r.quantityUnit || null,
     expiration_date: r.expirationDate || null,
@@ -69,6 +73,7 @@ app.http('reagentsGet', {
       const search = req.query.get('search');
       const unitId = req.query.get('unit_id');
       const lowStock = req.query.get('low_stock');
+      const status = req.query.get('status');
 
       const table = await getTable('reagents');
       const locsMap = await getLocationsMap(decoded.id);
@@ -101,6 +106,13 @@ app.http('reagentsGet', {
 
       if (lowStock === 'true') {
         reagents = reagents.filter(r => r.is_low_stock);
+      }
+
+      // Status filter: comma-separated list of statuses (e.g. "stored,in use").
+      // Default (no param) returns everything; the frontend applies its own default view.
+      if (status) {
+        const allowed = new Set(status.split(',').map(s => s.trim()).filter(Boolean));
+        reagents = reagents.filter(r => allowed.has(r.status || 'stored'));
       }
 
       reagents.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -259,6 +271,10 @@ app.http('reagentsCreate', {
         sourceUrl: body.source_url || '',
         storageLocationId: body.storage_location_id || '',
         specialConditions: body.special_conditions || '',
+        concentration: body.concentration || '',
+        notes: body.notes || '',
+        status: body.status || 'stored',
+        derivedFromId: body.derived_from_id || '',
         quantity: body.quantity ?? null,
         quantityUnit: body.quantity_unit || '',
         expirationDate: body.expiration_date || '',
@@ -310,6 +326,10 @@ app.http('reagentsUpdate', {
         source_url: 'sourceUrl',
         storage_location_id: 'storageLocationId',
         special_conditions: 'specialConditions',
+        concentration: 'concentration',
+        notes: 'notes',
+        status: 'status',
+        derived_from_id: 'derivedFromId',
         quantity: 'quantity',
         quantity_unit: 'quantityUnit',
         expiration_date: 'expirationDate',
@@ -331,6 +351,11 @@ app.http('reagentsUpdate', {
       }
 
       if (!updated) return jsonResponse(400, { error: 'No fields to update' });
+
+      // When a reagent is marked depleted, automatically clear its storage location.
+      if (body.status === 'depleted') {
+        entity.storageLocationId = '';
+      }
 
       entity.updatedAt = new Date().toISOString();
       await table.updateEntity(entity, 'Merge');

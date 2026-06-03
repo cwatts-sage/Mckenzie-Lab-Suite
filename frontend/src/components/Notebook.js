@@ -38,15 +38,8 @@ function Notebook() {
 
 
   // Form
-  const emptyForm = { title: '', content: '', project_id: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'note', linked_items: [] };
+  const emptyForm = { title: '', content: '', project_id: '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0], entry_type: 'protocol', linked_items: [] };
   const [form, setForm] = useState(emptyForm);
-  const [originalLinkedItems, setOriginalLinkedItems] = useState([]);
-
-  // Status update prompt
-  const [showStatusPrompt, setShowStatusPrompt] = useState(false);
-  const [newlyLinkedSamples, setNewlyLinkedSamples] = useState([]);
-  const [selectedForStatusUpdate, setSelectedForStatusUpdate] = useState(new Set());
-  const [statusPromptMode, setStatusPromptMode] = useState('ask'); // 'ask' or 'custom'
 
   // @-mention
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -98,7 +91,6 @@ function Notebook() {
 
   const openAdd = () => {
     setForm({ ...emptyForm, project_id: filterProject || '', experiment_id: '', entry_date: new Date().toISOString().split('T')[0] });
-    setOriginalLinkedItems([]);
     setEditing(null);
     setShowModal(true);
   };
@@ -113,7 +105,6 @@ function Notebook() {
       entry_type: entry.entry_type,
       linked_items: items
     });
-    setOriginalLinkedItems(items);
     setEditing(entry);
     setShowModal(true);
   };
@@ -127,56 +118,12 @@ function Notebook() {
         await notebookAPI.create(form);
       }
       setShowModal(false);
-
-      // Check for newly linked samples that aren't already "in use"
-      const originalIds = new Set(originalLinkedItems.filter(li => li.type === 'sample').map(li => li.id));
-      const newSamples = form.linked_items
-        .filter(li => li.type === 'sample' && !originalIds.has(li.id))
-        .map(li => {
-          const sampleData = samples.find(s => s.id === li.id);
-          return { ...li, status: sampleData?.status || 'stored' };
-        })
-        .filter(li => li.status !== 'in use' && li.status !== 'depleted');
-
-      if (newSamples.length > 0) {
-        setNewlyLinkedSamples(newSamples);
-        setSelectedForStatusUpdate(new Set(newSamples.map(s => s.id)));
-        setStatusPromptMode('ask');
-        setShowStatusPrompt(true);
-      } else {
-        setLoading(true);
-        fetchData();
-      }
+      // Newly linked samples keep their stored condition by default (no status prompt).
+      setLoading(true);
+      fetchData();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to save');
     }
-  };
-
-  const handleStatusUpdate = async (action) => {
-    if (action === 'yes') {
-      // Update all newly linked samples to "in use"
-      const ids = newlyLinkedSamples.map(s => s.id);
-      try {
-        await sampleAPI.batchUpdateStatus(ids, 'in use');
-      } catch (err) {
-        alert('Failed to update sample statuses');
-      }
-    } else if (action === 'custom') {
-      // Update only selected ones
-      const ids = [...selectedForStatusUpdate];
-      if (ids.length > 0) {
-        try {
-          await sampleAPI.batchUpdateStatus(ids, 'in use');
-        } catch (err) {
-          alert('Failed to update sample statuses');
-        }
-      }
-    }
-    // action === 'no' does nothing
-    setShowStatusPrompt(false);
-    setNewlyLinkedSamples([]);
-    setLoading(true);
-    fetchData();
   };
 
   const handleDelete = async () => {
@@ -307,7 +254,7 @@ function Notebook() {
     // Linked samples first
     if (linkedSamples.length > 0) {
       results.push({ type: 'header', label: '🔗 Linked to this experiment' });
-      linkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+      linkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}`, status: r.status }));
     }
 
     // Then reagents and unlinked samples
@@ -315,8 +262,8 @@ function Notebook() {
       if (linkedSamples.length > 0) {
         results.push({ type: 'header', label: '📂 Other items' });
       }
-      matchingReagents.forEach(r => results.push({ type: 'reagent', item: r, label: `📦 ${r.name}${r.catalog_number ? ` (${r.catalog_number})` : ''}` }));
-      unlinkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}` }));
+      matchingReagents.forEach(r => results.push({ type: 'reagent', item: r, label: `📦 ${r.name}${r.catalog_number ? ` (${r.catalog_number})` : ''}`, status: r.status }));
+      unlinkedSamples.forEach(r => results.push({ type: 'sample', item: r, label: `🧫 ${r.name}`, status: r.status }));
     }
 
     return results;
@@ -360,6 +307,17 @@ function Notebook() {
   };
 
   const typeInfo = (t) => ENTRY_TYPES.find(et => et.value === t) || ENTRY_TYPES[3];
+
+  // Small colored pill for sample/reagent status shown in lookups
+  const statusPillStyle = (status) => {
+    const map = {
+      'stored': { bg: '#eafaf1', fg: '#27ae60' },
+      'in use': { bg: '#fef5e7', fg: '#e67e22' },
+      'depleted': { bg: '#fdedec', fg: '#e74c3c' },
+    };
+    const c = map[status] || { bg: '#f0f0f0', fg: '#888' };
+    return { background: c.bg, color: c.fg, padding: '2px 8px', borderRadius: 10, fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap', textTransform: 'capitalize' };
+  };
 
   // Render content with @mentions and hyperlinks highlighted
   const renderContent = (content, linkedItems) => {
@@ -544,12 +502,13 @@ function Notebook() {
                             {r.label}
                           </div>
                         ) : (
-                          <div key={i} style={{padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f0f0', fontSize:'0.9rem'}}
+                          <div key={i} style={{padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f0f0', fontSize:'0.9rem', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8}}
                             onClick={() => insertMention(r.type, r.item)}
                             onMouseOver={(e) => e.currentTarget.style.background = '#f0f7ff'}
                             onMouseOut={(e) => e.currentTarget.style.background = 'white'}
                           >
-                            {r.label}
+                            <span>{r.label}</span>
+                            {r.status && <span style={statusPillStyle(r.status)}>{r.status}</span>}
                           </div>
                         )
                       ))}
@@ -726,75 +685,42 @@ function Notebook() {
         />
       )}
 
-      {/* Status Update Prompt */}
-      {showStatusPrompt && (
-        <div className="modal-overlay" onClick={() => handleStatusUpdate('no')}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:480}}>
-            <h2>🧫 Update Sample Status?</h2>
-            <p style={{color:'#555',marginBottom:16}}>
-              {newlyLinkedSamples.length === 1
-                ? 'You linked a new sample to this entry. Change its status to "In Use"?'
-                : `You linked ${newlyLinkedSamples.length} new samples to this entry. Change their status to "In Use"?`}
-            </p>
-
-            {statusPromptMode === 'ask' ? (
-              <>
-                <div style={{marginBottom:16}}>
-                  {newlyLinkedSamples.map(s => (
-                    <div key={s.id} style={{padding:'6px 0',fontSize:'0.9rem',display:'flex',alignItems:'center',gap:8}}>
-                      <span style={{background:'#d5f5e3',padding:'2px 8px',borderRadius:10,fontSize:'0.8rem'}}>🧫 {s.name}</span>
-                      <span style={{color:'#888',fontSize:'0.8rem'}}>({s.status})</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="modal-actions" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                  <button className="btn btn-secondary" onClick={() => handleStatusUpdate('no')}>No</button>
-                  {newlyLinkedSamples.length > 1 && (
-                    <button className="btn btn-secondary" onClick={() => setStatusPromptMode('custom')}>Custom</button>
-                  )}
-                  <button className="btn btn-primary" onClick={() => handleStatusUpdate('yes')}>
-                    Yes{newlyLinkedSamples.length > 1 ? ', all' : ''}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{marginBottom:16}}>
-                  {newlyLinkedSamples.map(s => (
-                    <label key={s.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',cursor:'pointer',fontSize:'0.9rem'}}>
-                      <input
-                        type="checkbox"
-                        checked={selectedForStatusUpdate.has(s.id)}
-                        onChange={(e) => {
-                          const next = new Set(selectedForStatusUpdate);
-                          if (e.target.checked) next.add(s.id); else next.delete(s.id);
-                          setSelectedForStatusUpdate(next);
-                        }}
-                      />
-                      <span style={{background:'#d5f5e3',padding:'2px 8px',borderRadius:10,fontSize:'0.8rem'}}>🧫 {s.name}</span>
-                      <span style={{color:'#888',fontSize:'0.8rem'}}>({s.status})</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="modal-actions">
-                  <button className="btn btn-secondary" onClick={() => setStatusPromptMode('ask')}>Back</button>
-                  <button className="btn btn-primary" onClick={() => handleStatusUpdate('custom')} disabled={selectedForStatusUpdate.size === 0}>
-                    Update Selected ({selectedForStatusUpdate.size})
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
+
+  // Truncate content for the minimized preview WITHOUT slicing through a markdown
+  // link [text](url) or an @[mention], so hyperlinks render properly when collapsed.
+  function previewContent(content, limit) {
+    if (!content) return { preview: '', hasMore: false };
+    if (content.length <= limit) return { preview: content, hasMore: false };
+    const tokenRe = /(@\[[^\]]+\]|\[[^\]]+\]\([^)]+\))/g;
+    let result = '';
+    let lastIndex = 0;
+    let match;
+    while ((match = tokenRe.exec(content)) !== null) {
+      const tokenStart = match.index;
+      const tokenEnd = tokenStart + match[0].length;
+      if (tokenStart >= limit) break;
+      // Plain text before this token
+      if (tokenStart > lastIndex) {
+        const plainEnd = Math.min(tokenStart, limit);
+        result += content.substring(lastIndex, plainEnd);
+        if (plainEnd >= limit) { lastIndex = plainEnd; return { preview: result, hasMore: true }; }
+      }
+      // Include the whole token (don't cut it) since it starts before the limit
+      result += match[0];
+      lastIndex = tokenEnd;
+    }
+    if (lastIndex < content.length && result.length < limit) {
+      result += content.substring(lastIndex, lastIndex + (limit - result.length));
+    }
+    return { preview: result, hasMore: content.length > result.length };
+  }
 
   function renderEntryCard(entry) {
     const ti = typeInfo(entry.entry_type);
     const isExpanded = expandedEntry === entry.id;
-    const contentPreview = (entry.content || '').substring(0, 200);
-    const hasMore = (entry.content || '').length > 200;
+    const { preview: contentPreview, hasMore } = previewContent(entry.content || '', 200);
 
     return (
       <div key={entry.id} style={{
@@ -826,7 +752,7 @@ function Notebook() {
           <div style={{background:'#fafafa', padding:12, borderRadius:8, fontSize:'0.9rem', lineHeight:1.6, marginBottom:8}}>
             {isExpanded
               ? renderContent(entry.content, entry.linked_items)
-              : renderContent(contentPreview + (hasMore ? '...' : ''), entry.linked_items)
+              : <>{renderContent(contentPreview, entry.linked_items)}{hasMore ? '…' : ''}</>
             }
             {hasMore && (
               <button className="btn btn-sm btn-secondary" style={{marginTop:8}}
