@@ -71,9 +71,10 @@ function fitRate(anchors) {
   const pts = anchors.filter(a => a.fraction > 0 && a.elapsedDays != null && a.elapsedDays > 0);
   if (pts.length === 0) return null;
   if (pts.length === 1) {
-    // Single anchor: rate so that fraction is hit at elapsed (ignoring lag refinement).
+    // Single anchor: rate so that fraction is hit exactly at its observed elapsed time.
+    // layLag MUST be 0 here so fracNow = slope*elapsed reproduces the observation (no double lag).
     const p = pts[0];
-    return { slope: p.fraction / p.elapsedDays, layLagDays: DEFAULT_LAY_LAG_DAYS, n: 1 };
+    return { slope: p.fraction / p.elapsedDays, layLagDays: 0, n: 1 };
   }
   // >=2 anchors: least-squares fraction = slope*(elapsed - lag). Solve slope & lag via linear regression
   // fraction = slope*elapsed - slope*lag  => treat as y = m*x + b, m=slope, b=-slope*lag.
@@ -122,14 +123,36 @@ function predict(vial, boxTemp, observations, nowIso) {
     n = 0;
   }
 
-  const fracNow = Math.max(0, slope * (elapsedNow - layLag));
+  let fracNow = Math.max(0, slope * (elapsedNow - layLag));
+
+  // Observations are authoritative: development only moves forward, so the predicted fraction
+  // can never be earlier than the most-recent observed stage's fraction. This guarantees that if
+  // you logged "wandering L3" today, the tube reads at least wandering L3 today.
+  let latestObsFrac = -1;
+  let latestObsElapsed = null;
+  obs.forEach(o => {
+    if (o.elapsedDays != null && (latestObsElapsed == null || o.elapsedDays >= latestObsElapsed)) {
+      latestObsElapsed = o.elapsedDays;
+      latestObsFrac = Math.max(latestObsFrac, o.fraction);
+    }
+  });
+  // Use the highest fraction among observations at/after the most recent observation time.
+  if (obs.length > 0) {
+    const maxObsFrac = Math.max(...obs.map(o => o.fraction));
+    // Project forward from the latest observation using the rate (so it can advance past it),
+    // but never fall below what was actually seen.
+    fracNow = Math.max(fracNow, maxObsFrac);
+  }
+
   const predictedStage = fractionToStage(fracNow);
 
-  // ETA to target stage
+  // ETA to target stage. If already at/past the target, ETA = 0 (window open now).
   const target = vial.target_stage || 'L3';
   const targetFrac = STAGE_FRACTION[target] != null ? STAGE_FRACTION[target] : STAGE_FRACTION.L3;
   let etaDays = null;
-  if (slope > 0) {
+  if (fracNow >= targetFrac) {
+    etaDays = 0;
+  } else if (slope > 0) {
     const elapsedAtTarget = targetFrac / slope + layLag;
     etaDays = elapsedAtTarget - elapsedNow;
   }
