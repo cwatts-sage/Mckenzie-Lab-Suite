@@ -150,13 +150,13 @@ function ProjectDetail() {
 
   // Experiments
   const openAddExperiment = () => {
-    setExpForm({ title: '', description: '', tags: '', status: 'active', conclusion: '', failed_reason: '' });
+    setExpForm({ title: '', description: '', tags: '', status: 'active', conclusion: '', failed_reason: '', abandon_reason: '' });
     setEditingExp(null);
     setShowExpModal(true);
   };
 
   const openEditExperiment = (exp) => {
-    setExpForm({ title: exp.title, description: exp.description || '', tags: exp.tags || '', status: exp.status || 'active', conclusion: exp.conclusion || '', failed_reason: exp.failed_reason || '' });
+    setExpForm({ title: exp.title, description: exp.description || '', tags: exp.tags || '', status: exp.status || 'active', conclusion: exp.conclusion || '', failed_reason: exp.failed_reason || '', abandon_reason: exp.abandon_reason || '' });
     setEditingExp(exp);
     setShowExpModal(true);
   };
@@ -182,6 +182,15 @@ function ProjectDetail() {
       setLoading(true);
       fetchData();
     } catch (err) { alert(err.response?.data?.error || 'Failed to create replicate'); }
+  };
+
+  const handleAbandonExperiment = async (exp) => {
+    const reason = window.prompt(`Abandon experiment "${exp.title}"?\nIt will be hidden from this project. Why are you abandoning it?`, '');
+    if (reason === null) return; // cancelled
+    try {
+      await projectAPI.updateExperiment(id, exp.id, { status: 'abandoned', abandon_reason: reason });
+      setLoading(true); fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to abandon experiment'); }
   };
 
   const handleToggleFailReplicate = async (expId, rep) => {
@@ -632,7 +641,7 @@ function ProjectDetail() {
                             <button className="btn btn-sm btn-secondary" onClick={() => handleCreateReplicate(exp.id)} title="New Replicate">+ Rep</button>
                             <button className="btn btn-sm btn-secondary" onClick={() => openAddEntry(exp.id, reps.length > 0 ? reps[0].id : '')} title="New Entry">+ Entry</button>
                             <button className="btn btn-sm btn-secondary" onClick={() => openEditExperiment(exp)}>✏️</button>
-                            <button className="btn btn-sm btn-danger" onClick={() => { setDeleteTarget(exp); setDeleteType('experiment'); }}>🗑️</button>
+                            <button className="btn btn-sm btn-secondary" onClick={() => handleAbandonExperiment(exp)} title="Abandon experiment">🚫</button>
                           </div>
                         </div>
 
@@ -816,6 +825,9 @@ function ProjectDetail() {
             )}
             {expForm.status === 'completed' && (
               <div className="form-group"><label>✅ Conclusion</label><textarea value={expForm.conclusion} onChange={(e) => setExpForm({...expForm, conclusion: e.target.value})} rows={3} style={{resize:'vertical'}} placeholder="Summary of findings / outcome of this experiment..." /></div>
+            )}
+            {expForm.status === 'abandoned' && (
+              <div className="form-group"><label>🚫 Reason for Abandoning</label><input value={expForm.abandon_reason} onChange={(e) => setExpForm({...expForm, abandon_reason: e.target.value})} placeholder="Why are you abandoning this?" /></div>
             )}
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowExpModal(false)}>Cancel</button>

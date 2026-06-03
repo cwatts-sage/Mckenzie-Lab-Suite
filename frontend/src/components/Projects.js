@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projectAPI, reagentAPI, sampleAPI } from '../api';
-import DeleteConfirmModal from './DeleteConfirmModal';
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '🟢 Active', color: '#27ae60' },
@@ -18,9 +17,8 @@ function Projects() {
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ title: '', description: '', purpose: '', hypothesis: '', status: 'active', tags: '', strains: [], controls: [] });
+  const [form, setForm] = useState({ title: '', description: '', purpose: '', hypothesis: '', status: 'active', tags: '', strains: [], controls: [], abandon_reason: '' });
   const [filter, setFilter] = useState('all');
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const navigate = useNavigate();
 
   // Strain/control picker state
@@ -48,7 +46,7 @@ function Projects() {
   useEffect(() => { fetchData(); }, []);
 
   const openAdd = () => {
-    setForm({ title: '', description: '', purpose: '', hypothesis: '', status: 'active', tags: '', strains: [], controls: [] });
+    setForm({ title: '', description: '', purpose: '', hypothesis: '', status: 'active', tags: '', strains: [], controls: [], abandon_reason: '' });
     setEditing(null);
     setShowModal(true);
   };
@@ -63,6 +61,7 @@ function Projects() {
       tags: proj.tags || '',
       strains: proj.strains || [],
       controls: proj.controls || [],
+      abandon_reason: proj.abandon_reason || '',
     });
     setEditing(proj);
     setShowModal(true);
@@ -84,13 +83,15 @@ function Projects() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleAbandon = async (proj) => {
+    const reason = window.prompt(`Abandon project "${proj.title}"?\nIt will be hidden from your projects list. Why are you abandoning it?`, '');
+    if (reason === null) return; // cancelled
     try {
-      await projectAPI.delete(deleteTarget.id);
-      setDeleteTarget(null);
+      await projectAPI.update(proj.id, { status: 'abandoned', abandon_reason: reason });
+      setLoading(true);
       fetchData();
     } catch (err) {
-      alert('Failed to delete');
+      alert(err.response?.data?.error || 'Failed to abandon project');
     }
   };
 
@@ -138,8 +139,9 @@ function Projects() {
         <div className="search-bar">
           <select value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="all">All Status</option>
-            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {STATUS_OPTIONS.filter(o => o.value !== 'abandoned').map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <span style={{fontSize:'0.8rem',color:'#999',alignSelf:'center'}}>Sorted by most recently modified</span>
         </div>
 
         {filtered.length === 0 ? (
@@ -179,13 +181,13 @@ function Projects() {
                           <span style={{fontSize:'0.8rem', color:'#888'}}>🧬 {proj.strains.length} strain{proj.strains.length !== 1 ? 's' : ''}</span>
                         )}
                         <span style={{fontSize:'0.8rem', color:'#999'}}>
-                          Created {new Date(proj.created_at).toLocaleDateString()}
+                          Modified {new Date(proj.updated_at || proj.created_at).toLocaleDateString()}
                         </span>
                       </div>
                     </div>
                     <div style={{display:'flex', gap:6}} onClick={(e) => e.stopPropagation()}>
                       <button className="btn btn-sm btn-secondary" onClick={() => openEdit(proj)}>Edit</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(proj)}>🗑️</button>
+                      <button className="btn btn-sm btn-secondary" onClick={() => handleAbandon(proj)} title="Abandon project">🚫</button>
                     </div>
                   </div>
                 </div>
@@ -227,6 +229,12 @@ function Projects() {
                 <input value={form.tags} onChange={(e) => setForm({...form, tags: e.target.value})} placeholder="comma, separated, tags" />
               </div>
             </div>
+            {form.status === 'abandoned' && (
+              <div className="form-group">
+                <label>🚫 Reason for Abandoning</label>
+                <input value={form.abandon_reason} onChange={(e) => setForm({...form, abandon_reason: e.target.value})} placeholder="Why are you abandoning this?" />
+              </div>
+            )}
 
             {/* Strains picker */}
             <div className="form-group" style={{position:'relative'}}>
@@ -332,13 +340,6 @@ function Projects() {
         </div>
       )}
 
-      {deleteTarget && (
-        <DeleteConfirmModal
-          itemName={`"${deleteTarget.title}" and all its experiments & notebook entries`}
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteTarget(null)}
-        />
-      )}
     </div>
   );
 }

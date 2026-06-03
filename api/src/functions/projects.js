@@ -15,6 +15,7 @@ function formatProject(entity) {
     controls: entity.controls ? JSON.parse(entity.controls) : [],
     scratch_pad: entity.scratchPad || '',
     status: entity.status || 'active',
+    abandon_reason: entity.abandonReason || '',
     tags: entity.tags || '',
     created_at: entity.createdAt,
     updated_at: entity.updatedAt
@@ -31,6 +32,7 @@ function formatExperiment(entity) {
     status: entity.status || 'active',
     conclusion: entity.conclusion || '',
     failed_reason: entity.failedReason || '',
+    abandon_reason: entity.abandonReason || '',
     tags: entity.tags || '',
     created_at: entity.createdAt,
     updated_at: entity.updatedAt
@@ -71,11 +73,12 @@ app.http('projectsGet', {
       const entities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of entities) {
         if (!entity.projectId) {
-          // This is a project (top-level)
+          // This is a project (top-level) — hide abandoned ones from the list
+          if (entity.status === 'abandoned') continue;
           projects.push(formatProject(entity));
         } else {
-          // This is an experiment — count per project (exclude failed/archived)
-          if (entity.status !== 'failed' && entity.status !== 'archived') {
+          // This is an experiment — count per project (exclude failed/archived/abandoned)
+          if (entity.status !== 'failed' && entity.status !== 'archived' && entity.status !== 'abandoned') {
             experimentCounts[entity.projectId] = (experimentCounts[entity.projectId] || 0) + 1;
           }
         }
@@ -96,6 +99,7 @@ app.http('projectsGet', {
         p.experiment_count = experimentCounts[p.id] || 0;
       });
 
+      // Sort by most recently modified (updated_at desc)
       projects.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
       return jsonResponse(200, projects);
     } catch (e) {
@@ -131,6 +135,8 @@ app.http('projectsGetOne', {
       const allEntities = table.listEntities({ queryOptions: { filter: `PartitionKey eq '${decoded.id}'` } });
       for await (const entity of allEntities) {
         if (entity.projectId === id) {
+          // Hide abandoned experiments from the list (abandoned = soft delete)
+          if (entity.status === 'abandoned') continue;
           experiments.push(formatExperiment(entity));
         }
       }
@@ -158,8 +164,8 @@ app.http('projectsGetOne', {
       experiments.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
 
       project.experiments = experiments;
-      // experiment_count excludes failed/archived (active work only)
-      project.experiment_count = experiments.filter(e => e.status !== 'failed' && e.status !== 'archived').length;
+      // experiment_count excludes failed/archived/abandoned (active work only)
+      project.experiment_count = experiments.filter(e => e.status !== 'failed' && e.status !== 'archived' && e.status !== 'abandoned').length;
 
       return jsonResponse(200, project);
     } catch (e) {
@@ -235,11 +241,12 @@ app.http('projectsUpdate', {
       }
 
       const now = new Date().toISOString();
+      const status = (body.status !== undefined ? body.status : existing.status) || 'active';
       const updated = {
         partitionKey: decoded.id,
         rowKey: id,
         title: (body.title !== undefined ? body.title : existing.title) || '',
-        status: (body.status !== undefined ? body.status : existing.status) || 'active',
+        status,
         createdAt: existing.createdAt || now,
         updatedAt: now
       };
@@ -249,12 +256,15 @@ app.http('projectsUpdate', {
       const purpose = body.purpose !== undefined ? body.purpose : (existing.purpose || '');
       const hypothesis = body.hypothesis !== undefined ? body.hypothesis : (existing.hypothesis || '');
       const scratchPad = body.scratch_pad !== undefined ? body.scratch_pad : (existing.scratchPad || '');
+      const abandonReason = body.abandon_reason !== undefined ? body.abandon_reason : (existing.abandonReason || '');
 
       if (desc) updated.description = desc;
       if (tgs) updated.tags = tgs;
       if (purpose) updated.purpose = purpose;
       if (hypothesis) updated.hypothesis = hypothesis;
       if (scratchPad) updated.scratchPad = scratchPad;
+      // Keep abandon reason only while abandoned.
+      if (status === 'abandoned' && abandonReason) updated.abandonReason = abandonReason;
 
       if (body.strains !== undefined) {
         if (body.strains && body.strains.length > 0) updated.strains = JSON.stringify(body.strains);
@@ -486,11 +496,14 @@ app.http('projectExperimentUpdate', {
       const tgs = body.tags !== undefined ? body.tags : (existing.tags || '');
       const concl = body.conclusion !== undefined ? body.conclusion : (existing.conclusion || '');
       const failReason = body.failed_reason !== undefined ? body.failed_reason : (existing.failedReason || '');
+      const abandonReason = body.abandon_reason !== undefined ? body.abandon_reason : (existing.abandonReason || '');
       if (desc) updated.description = desc;
       if (tgs) updated.tags = tgs;
       if (concl) updated.conclusion = concl;
       // Only keep a failed reason while the experiment is actually failed.
       if (status === 'failed' && failReason) updated.failedReason = failReason;
+      // Keep abandon reason only while abandoned.
+      if (status === 'abandoned' && abandonReason) updated.abandonReason = abandonReason;
 
       await table.updateEntity(updated, 'Replace');
       return jsonResponse(200, formatExperiment(updated));
