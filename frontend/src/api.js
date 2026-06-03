@@ -104,6 +104,7 @@ export const flyAPI = {
   createVial: (data) => api.post('/fly/vials', data),
   updateVial: (id, data) => api.put(`/fly/vials/${id}`, data),
   flipVial: (id, data) => api.post(`/fly/vials/${id}/flip`, data || {}),
+  transferVial: (id, data) => api.post(`/fly/vials/${id}/transfer`, data || {}),
   deleteVial: (id) => api.delete(`/fly/vials/${id}`),
   addObservation: (vialId, data) => api.post(`/fly/vials/${vialId}/observations`, data),
   deleteObservation: (vialId, obsId) => api.delete(`/fly/vials/${vialId}/observations/${obsId}`),

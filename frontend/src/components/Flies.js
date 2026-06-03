@@ -31,6 +31,7 @@ function Flies() {
   const [obsDate, setObsDate] = useState(todayStr());
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  const [expandedLineage, setExpandedLineage] = useState(null);
 
   function emptyVialForm() {
     return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: todayStr(), flip_interval_days: 21 };
@@ -73,6 +74,11 @@ function Flies() {
     if (!window.confirm(`Flip "${v.name}" today? Next flip will be scheduled in ${v.flip_interval_days || 21} days.`)) return;
     try { await flyAPI.flipVial(v.id, { flip_date: todayStr() }); setLoading(true); fetchData(); }
     catch (err) { alert('Failed to flip'); }
+  };
+  const transferParents = async (v) => {
+    if (!window.confirm(`Transfer the parents from "${v.name}" into a fresh tube today? This creates the next staggered cohort and leaves this tube to keep developing.`)) return;
+    try { await flyAPI.transferVial(v.id, { transfer_date: todayStr() }); setLoading(true); fetchData(); }
+    catch (err) { alert(err.response?.data?.error || 'Failed to transfer'); }
   };
 
   // ----- Observations -----
@@ -132,6 +138,8 @@ function Flies() {
         attention.push({ vial: v, kind: 'target', text: p.eta_to_target_days <= 0 ? `${stageLabel(p.target_stage)} window open now` : `${stageLabel(p.target_stage)} in ~${p.eta_to_target_days}d` });
       if (p.clear_parents_in_days != null && p.clear_parents_in_days <= 2 && p.clear_parents_in_days >= -3)
         attention.push({ vial: v, kind: 'parents', text: p.clear_parents_in_days <= 0 ? '⚠️ Clear parents now!' : `Clear parents in ~${p.clear_parents_in_days}d` });
+      if (v.holds_parents && p.transfer_due_in_days != null && p.transfer_due_in_days <= 0.5)
+        attention.push({ vial: v, kind: 'transfer', text: p.transfer_due_in_days < 0 ? `Transfer parents (${-Math.round(p.transfer_due_in_days)}d overdue)` : 'Transfer parents to a fresh tube' });
     }
   });
 
@@ -178,7 +186,7 @@ function Flies() {
               <div style={{ color: '#999', fontSize: '0.88rem', padding: 8 }}>No tubes in this box yet.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {tubes.map(v => renderTube(v))}
+                {renderTubeList(tubes)}
               </div>
             )}
           </div>
@@ -187,7 +195,7 @@ function Flies() {
       {(byBox.unassigned || []).length > 0 && (
         <div className="card">
           <div className="card-header"><h3 style={{ fontSize: '1.05rem', margin: 0 }}>❔ Unassigned</h3></div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{byBox.unassigned.map(v => renderTube(v))}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{renderTubeList(byBox.unassigned)}</div>
         </div>
       )}
 
@@ -271,7 +279,47 @@ function Flies() {
     </div>
   );
 
-  function renderTube(v) {
+  // Group cross cohorts (same lineage_id) under one collapsible header; stocks & single tubes render flat.
+  function renderTubeList(tubes) {
+    const groups = {};
+    const order = [];
+    tubes.forEach(v => {
+      const key = (v.type === 'cross') ? (v.lineage_id || v.id) : `single:${v.id}`;
+      if (!groups[key]) { groups[key] = []; order.push(key); }
+      groups[key].push(v);
+    });
+    return order.map(key => {
+      const g = groups[key].slice().sort((a, b) => (a.cohort_number || 1) - (b.cohort_number || 1));
+      if (g.length === 1) return renderTube(g[0]);
+      // Multi-cohort lineage group
+      const base = (g[0].name || 'Cross').replace(/\s*[\u2014-]\s*set\s*\d+\s*$/i, '').trim();
+      const isOpen = expandedLineage === key;
+      const needsAttn = g.some(v => v.prediction && (
+        (v.prediction.eta_to_target_days != null && v.prediction.eta_to_target_days <= 1.5 && v.prediction.eta_to_target_days >= -2) ||
+        (v.holds_parents && v.prediction.transfer_due_in_days != null && v.prediction.transfer_due_in_days <= 0.5)
+      ));
+      return (
+        <div key={key} style={{ border: '1px solid #e6dcf0', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ background: '#f5eefb', padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+            onClick={() => setExpandedLineage(isOpen ? null : key)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ color: '#888', fontSize: '0.8rem', transform: isOpen ? 'none' : 'rotate(-90deg)' }}>▼</span>
+              <strong>⚗️ {base}</strong>
+              <span style={{ fontSize: '0.78rem', color: '#7a5ea8' }}>{g.length} staggered cohorts</span>
+              {needsAttn && <span style={{ fontSize: '0.72rem', color: '#c0392b' }}>⏰ action</span>}
+            </div>
+          </div>
+          {isOpen && (
+            <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {g.map(v => renderTube(v, true))}
+            </div>
+          )}
+        </div>
+      );
+    });
+  }
+
+  function renderTube(v, inGroup) {
     const isOpen = expanded === v.id;
     const p = v.prediction;
     const fd = flipDueInfo(v);
@@ -280,7 +328,8 @@ function Flies() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <strong>{v.type === 'cross' ? '⚗️' : '🧪'} {v.name}</strong>
+              <strong>{v.type === 'cross' ? '⚗️' : '🧪'} {inGroup ? `Set ${v.cohort_number}` : v.name}</strong>
+              {inGroup && v.holds_parents && <span style={{ fontSize: '0.7rem', background: '#9b59b6', color: 'white', padding: '1px 6px', borderRadius: 8 }}>has parents</span>}
               {v.type === 'cross' && predBadge(p)}
               {v.type === 'stock' && fd && <span style={{ fontSize: '0.78rem', color: fd.days <= 0 ? '#c0392b' : fd.days <= 3 ? '#e67e22' : '#888' }}>🔄 {fd.days < 0 ? `overdue ${-fd.days}d` : fd.days === 0 ? 'flip today' : `flip in ${fd.days}d`}</span>}
             </div>
@@ -289,6 +338,7 @@ function Flies() {
               <div style={{ fontSize: '0.8rem', color: '#666', marginTop: 2 }}>
                 {p.eta_to_target_days != null && <span>🎯 {stageLabel(p.target_stage)} {p.eta_to_target_days <= 0 ? 'now' : `~${p.eta_to_target_days}d`}</span>}
                 {p.clear_parents_in_days != null && <span style={{ marginLeft: 10, color: p.clear_parents_in_days <= 2 ? '#c0392b' : '#666' }}>👪 clear parents {p.clear_parents_in_days <= 0 ? 'now' : `~${p.clear_parents_in_days}d`}</span>}
+                {v.holds_parents && p.transfer_due_in_days != null && <span style={{ marginLeft: 10, color: p.transfer_due_in_days <= 0.5 ? '#9b59b6' : '#999' }}>🔄 transfer {p.transfer_due_in_days <= 0 ? 'now' : `~${p.transfer_due_in_days}d`}</span>}
                 {p.speed_vs_standard != null && <span style={{ marginLeft: 10, color: '#999' }}>· {p.speed_vs_standard}× standard</span>}
                 <span style={{ marginLeft: 10, color: '#bbb' }}>({p.mode})</span>
               </div>
@@ -296,6 +346,7 @@ function Flies() {
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {v.type === 'cross' && <button className="btn btn-sm btn-primary" onClick={() => { setObsDate(todayStr()); setObsVial(v); }}>👁️ Log</button>}
+            {v.type === 'cross' && v.holds_parents && <button className="btn btn-sm btn-secondary" onClick={() => transferParents(v)} title="Move parents to a fresh staggered tube">🔄 Transfer</button>}
             {v.type === 'stock' && <button className="btn btn-sm btn-primary" onClick={() => flipStock(v)}>🔄 Flip</button>}
             <button className="btn btn-sm btn-secondary" onClick={() => setExpanded(isOpen ? null : v.id)}>{isOpen ? '▲' : '▼'}</button>
             <button className="btn btn-sm btn-secondary" onClick={() => openEditVial(v)}>✏️</button>

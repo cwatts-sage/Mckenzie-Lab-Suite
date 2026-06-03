@@ -155,3 +155,31 @@ Q9. FlyBase link import (auto-pull allele info) — include in v1 or defer to a 
 - `flyvials`: drop per-tube temperature; add box_id, target_stage (default 'L3'), start_event fixed to 'parents_set'.
 - `flyobservations.stage_seen` enum reduced to: new_tube | L3 | wandering_L3 | pupa | new_adults.
 - flip_interval_days default 21.
+
+## FEATURE: Staggered crosses (serial parent transfer) — 2026-06-03
+McKenzie's real workflow: for a cross, she moves the SAME parents into a fresh tube every 2-3 days
+to generate multiple staggered offspring cohorts. Each resulting tube is an independent cohort with its
+own start_date (= the day parents were moved in) and its own stage prediction.
+
+Design (proposed):
+- Add a "🔄 Transfer parents" action on a CROSS tube → creates a NEW cross tube ("cohort"):
+  - new tube start_date = transfer date (today by default), same genotype/name base, same box (editable),
+    same target_stage, fresh predictions.
+  - Auto-name: "<base> — set N" or "<base> (cohort YYYY-MM-DD)".
+- Lineage linkage: new fields on flyvials:
+  - lineage_id: shared id across all cohorts from the same parents (the original tube's id, or a new uuid).
+  - cohort_number: 1,2,3... incrementing per transfer.
+  - parent_tube_id: the tube the parents came from (the previous cohort).
+- The ORIGINAL/source tube stays as-is (its offspring keep developing). Optionally mark when parents left
+  it (parents_removed_date) — useful since after parents leave, no new eggs are laid there.
+- UI: group cohorts visually (e.g. "Cross: w1118×Arc1 — 3 cohorts" with each cohort listed + its stage).
+  Could show a compact lineage strip. Attention widget already covers each cohort's target window.
+- "Clear parents" semantics with staggering: the parents are continuously moving, so the per-tube
+  "clear parents" deadline is less relevant for the source tubes (parents already gone after transfer).
+  Show clear-parents only on the CURRENT (latest) cohort that still holds the parents.
+
+Open Qs for McKenzie:
+- A) When you transfer, should the app auto-create the next cohort tube (recommended) — yes?
+- B) Keep all cohorts under one grouped "cross lineage" card, or just flat list with a shared tag?
+- C) Want a quick "transfer every N days" reminder on the active (parent-holding) cohort?
+- D) Naming preference: "set 1/2/3", date-stamped, or you type it each time?
