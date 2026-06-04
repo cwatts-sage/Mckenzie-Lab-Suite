@@ -12,6 +12,14 @@ const STAGES = [
 const stageLabel = (v) => (STAGES.find(s => s.value === v) || {}).short || v;
 
 const todayStr = () => new Date().toISOString().split('T')[0];
+// Date-based "set" label: month.day, no year (e.g. "6.4"). Falls back to cohort number.
+const setLabel = (v) => {
+  if (v.start_date) {
+    const d = new Date(v.start_date + 'T12:00:00');
+    if (!isNaN(d.getTime())) return `${d.getMonth() + 1}.${d.getDate()}`;
+  }
+  return String(v.cohort_number || 1);
+};
 
 function Flies() {
   const [vials, setVials] = useState([]);
@@ -71,6 +79,11 @@ function Flies() {
   const doDeleteVial = async () => {
     try { await flyAPI.deleteVial(deleteTarget.id); setDeleteTarget(null); fetchData(); }
     catch (err) { alert('Failed to delete'); }
+  };
+  const archiveVial = async (v) => {
+    if (!window.confirm(`Archive "${v.name}"? It'll disappear from the active view but its growth data is kept (and still helps predict future cohorts in this lineage). Use this when you've tossed the adults.`)) return;
+    try { await flyAPI.updateVial(v.id, { status: 'archived' }); setLoading(true); fetchData(); }
+    catch (err) { alert(err.response?.data?.error || 'Failed to archive'); }
   };
   const flipStock = async (v) => {
     if (!window.confirm(`Flip "${v.name}" today? Next flip will be scheduled in ${v.flip_interval_days || 21} days.`)) return;
@@ -326,7 +339,7 @@ function Flies() {
       const g = groups[key].slice().sort((a, b) => (a.cohort_number || 1) - (b.cohort_number || 1));
       if (g.length === 1) return renderTube(g[0]);
       // Multi-cohort lineage group
-      const base = (g[0].name || 'Cross').replace(/\s*[\u2014-]\s*set\s*\d+\s*$/i, '').trim();
+      const base = (g[0].name || 'Cross').replace(/\s*[\u2014-]\s*set\s*[\d.]+\s*$/i, '').trim();
       const isOpen = expandedLineage === key;
       const needsAttn = g.some(v => v.prediction && (
         (v.prediction.eta_to_target_days != null && v.prediction.eta_to_target_days <= 1.5 && v.prediction.eta_to_target_days >= -2) ||
@@ -362,7 +375,7 @@ function Flies() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <strong>{v.type === 'cross' ? '⚗️' : '🧪'} {inGroup ? `Set ${v.cohort_number}` : v.name}</strong>
+              <strong>{v.type === 'cross' ? '⚗️' : '🧪'} {inGroup ? `Set ${setLabel(v)}` : v.name}</strong>
               {inGroup && v.holds_parents && <span style={{ fontSize: '0.7rem', background: '#9b59b6', color: 'white', padding: '1px 6px', borderRadius: 8 }}>has parents</span>}
               {v.type === 'cross' && predBadge(p)}
               {v.type === 'stock' && fd && <span style={{ fontSize: '0.78rem', color: fd.days <= 0 ? '#c0392b' : fd.days <= 3 ? '#e67e22' : '#888' }}>🔄 {fd.days < 0 ? `overdue ${-fd.days}d` : fd.days === 0 ? 'flip today' : `flip in ${fd.days}d`}</span>}
@@ -384,7 +397,8 @@ function Flies() {
             {v.type === 'stock' && <button className="btn btn-sm btn-primary" onClick={() => flipStock(v)}>🔄 Flip</button>}
             <button className="btn btn-sm btn-secondary" onClick={() => setExpanded(isOpen ? null : v.id)}>{isOpen ? '▲' : '▼'}</button>
             <button className="btn btn-sm btn-secondary" onClick={() => openEditVial(v)}>✏️</button>
-            <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(v)}>🗑️</button>
+            <button className="btn btn-sm btn-secondary" onClick={() => archiveVial(v)} title="Hide but keep growth data (use when you toss the adults)">📦</button>
+            <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(v)} title="Permanently delete tube AND its growth data">🗑️</button>
           </div>
         </div>
         {isOpen && (

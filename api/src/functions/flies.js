@@ -354,15 +354,18 @@ app.http('flyVialTransfer', {
       }
       const nextCohort = maxCohort + 1;
 
-      // Base name: strip any existing " — set N" suffix from source name.
-      const baseName = (src.name || 'Cross').replace(/\s*[\u2014-]\s*set\s*\d+\s*$/i, '').trim();
+      // Base name: strip any existing " — set X" suffix (numeric or M.D date) from source name.
+      const baseName = (src.name || 'Cross').replace(/\s*[\u2014-]\s*set\s*[\d.]+\s*$/i, '').trim();
+      // Date-based set label: month.day of the transfer (e.g. "6.4"). No year.
+      const sd = new Date(transferDate + 'T12:00:00');
+      const setLabel = isNaN(sd.getTime()) ? String(nextCohort) : `${sd.getMonth() + 1}.${sd.getDate()}`;
       const transferInterval = src.transferIntervalDays != null ? Number(src.transferIntervalDays) : 3;
 
       // Create the new cohort tube (now holds the parents).
       const newId = uuidv4();
       const child = {
         partitionKey: decoded.id, rowKey: newId,
-        name: `${baseName} — set ${nextCohort}`,
+        name: `${baseName} — set ${setLabel}`,
         vialType: 'cross',
         genotype: src.genotype || '',
         boxId: body.box_id || src.boxId || '',
