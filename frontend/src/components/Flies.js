@@ -29,6 +29,8 @@ function Flies() {
 
   const [obsVial, setObsVial] = useState(null); // vial we're logging an observation for
   const [obsDate, setObsDate] = useState(todayStr());
+  const [obsStages, setObsStages] = useState([]); // multi-select: stages present today
+  const [obsSaving, setObsSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [expandedLineage, setExpandedLineage] = useState(null);
@@ -82,11 +84,26 @@ function Flies() {
   };
 
   // ----- Observations -----
-  const logObservation = async (vialId, stage) => {
+  const toggleObsStage = (stage) => {
+    setObsStages(prev => prev.includes(stage) ? prev.filter(s => s !== stage) : [...prev, stage]);
+  };
+  const openObs = (v) => { setObsDate(todayStr()); setObsStages([]); setObsVial(v); };
+  const saveObservations = async () => {
+    if (obsStages.length === 0) { alert('Pick at least one stage you see (or Cancel).'); return; }
+    setObsSaving(true);
     try {
-      await flyAPI.addObservation(vialId, { stage_seen: stage, observed_at: obsDate });
-      setObsVial(null); setObsDate(todayStr()); setLoading(true); fetchData();
-    } catch (err) { alert(err.response?.data?.error || 'Failed to log'); }
+      // One observation row per stage present, all sharing today's date. The prediction
+      // model already takes the most-advanced stage at the latest time, so logging the
+      // full mix preserves the staggering signal without breaking ETA math.
+      for (const stage of obsStages) {
+        await flyAPI.addObservation(obsVial.id, { stage_seen: stage, observed_at: obsDate });
+      }
+      setObsVial(null); setObsDate(todayStr()); setObsStages([]); setLoading(true); fetchData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to log');
+    } finally {
+      setObsSaving(false);
+    }
   };
 
   // ----- Boxes -----
@@ -256,19 +273,36 @@ function Flies() {
         </div>
       )}
 
-      {/* Observation logger */}
+      {/* Observation logger — multi-select: tick every stage present in the tube today */}
       {obsVial && (
         <div className="modal-overlay" onClick={() => setObsVial(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <h2>Log observation</h2>
-            <p style={{ color: '#666', marginBottom: 12 }}><strong>{obsVial.name}</strong> — what do you see today?</p>
+            <p style={{ color: '#666', marginBottom: 12 }}><strong>{obsVial.name}</strong> — tick <em>every</em> stage you see today (mixed tubes are normal).</p>
             <div className="form-group"><label>Date</label><input type="date" value={obsDate} onChange={(e) => setObsDate(e.target.value)} /></div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-              {STAGES.map(s => (
-                <button key={s.value} className="btn btn-secondary" style={{ justifyContent: 'flex-start', fontSize: '1rem', padding: '10px 14px' }} onClick={() => logObservation(obsVial.id, s.value)}>{s.label}</button>
-              ))}
+              {STAGES.map(s => {
+                const on = obsStages.includes(s.value);
+                return (
+                  <button
+                    key={s.value}
+                    className={`btn ${on ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ justifyContent: 'flex-start', fontSize: '1rem', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}
+                    onClick={() => toggleObsStage(s.value)}
+                  >
+                    <span style={{ width: 20, display: 'inline-block', textAlign: 'center' }}>{on ? '☑️' : '⬜️'}</span>
+                    <span>{s.label}</span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setObsVial(null)}>Cancel</button></div>
+            <div style={{ fontSize: '0.78rem', color: '#999', marginBottom: 10 }}>
+              {obsStages.length === 0 ? 'Nothing selected yet.' : `Logging ${obsStages.length} stage${obsStages.length !== 1 ? 's' : ''} for ${obsDate}.`}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setObsVial(null)} disabled={obsSaving}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveObservations} disabled={obsSaving || obsStages.length === 0}>{obsSaving ? 'Saving…' : 'Save'}</button>
+            </div>
           </div>
         </div>
       )}
@@ -345,7 +379,7 @@ function Flies() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {v.type === 'cross' && <button className="btn btn-sm btn-primary" onClick={() => { setObsDate(todayStr()); setObsVial(v); }}>👁️ Log</button>}
+            {v.type === 'cross' && <button className="btn btn-sm btn-primary" onClick={() => openObs(v)}>👁️ Log</button>}
             {v.type === 'cross' && v.holds_parents && <button className="btn btn-sm btn-secondary" onClick={() => transferParents(v)} title="Move parents to a fresh staggered tube">🔄 Transfer</button>}
             {v.type === 'stock' && <button className="btn btn-sm btn-primary" onClick={() => flipStock(v)}>🔄 Flip</button>}
             <button className="btn btn-sm btn-secondary" onClick={() => setExpanded(isOpen ? null : v.id)}>{isOpen ? '▲' : '▼'}</button>
