@@ -199,8 +199,23 @@ function Flies() {
     }
   });
   // Split into today (due <= 0.5) and tomorrow (the rest, <= 1.5).
+  // Tomorrow peek also pulls cross target/clear-parents/flip items landing within ~2 days
+  // even if they didn't make the strict rawItems cut, so the peek is genuinely useful.
   const todayItems = rawItems.filter(i => i.due <= 0.5);
-  const tomorrowItems = rawItems.filter(i => i.due > 0.5);
+  const tomorrowItems = [];
+  vials.forEach(v => {
+    if (isSnoozed(v)) return;
+    const fd = flipDueInfo(v);
+    if (fd && fd.days === 1) tomorrowItems.push({ vial: v, kind: 'flip', due: 1, text: 'Flip tomorrow' });
+    if (v.type === 'cross' && v.prediction) {
+      const p = v.prediction;
+      if (p.eta_to_target_days != null && p.eta_to_target_days > 0.5 && p.eta_to_target_days <= 2)
+        tomorrowItems.push({ vial: v, kind: 'target', due: p.eta_to_target_days, text: `${stageLabel(p.target_stage)} window ~${p.eta_to_target_days}d` });
+      if (p.clear_parents_in_days != null && p.clear_parents_in_days > 0.5 && p.clear_parents_in_days <= 2)
+        tomorrowItems.push({ vial: v, kind: 'parents', due: p.clear_parents_in_days, text: `Clear parents ~${p.clear_parents_in_days}d` });
+    }
+  });
+  tomorrowItems.sort((a, b) => a.due - b.due);
   // Summary counts (today only).
   const counts = { target: 0, transfer: 0, parents: 0, flip: 0 };
   todayItems.forEach(i => { counts[i.kind] = (counts[i.kind] || 0) + 1; });
@@ -239,7 +254,7 @@ function Flies() {
         {boxes.length === 0 && (
           <div className="empty-state"><div className="emoji">📦</div><p>Add a box first (with its temperature), then start adding tubes.</p></div>
         )}
-        {(todayItems.length > 0 || tomorrowItems.length > 0) && (
+        {boxes.length > 0 && (
           <div style={{ background: '#fff8e1', border: '1px solid #ffe0a3', borderRadius: 8, padding: '10px 14px', marginTop: 8 }}>
             {/* Summary bar */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', cursor: todayItems.length ? 'pointer' : 'default' }}
@@ -279,11 +294,10 @@ function Flies() {
               </div>
             )}
 
-            {/* Quiet tomorrow peek */}
-            {tomorrowItems.length > 0 && (
-              <div style={{ marginTop: 8, borderTop: '1px dashed #ffe0a3', paddingTop: 6 }}>
-                <span style={{ fontSize: '0.76rem', color: '#b08a3a', cursor: 'pointer' }} onClick={() => setShowTomorrow(s => !s)}>
-                  {showTomorrow ? '▲ hide' : `▼ preview tomorrow (${tomorrowItems.length})`}
+            {/* Quiet tomorrow peek — always shown so the affordance is discoverable */}
+            <div style={{ marginTop: 8, borderTop: '1px dashed #ffe0a3', paddingTop: 6 }}>
+                <span style={{ fontSize: '0.76rem', color: tomorrowItems.length ? '#b08a3a' : '#bbb', cursor: tomorrowItems.length ? 'pointer' : 'default' }} onClick={() => tomorrowItems.length && setShowTomorrow(s => !s)}>
+                  {tomorrowItems.length === 0 ? '○ nothing coming tomorrow' : showTomorrow ? '▲ hide tomorrow' : `▼ preview tomorrow (${tomorrowItems.length})`}
                 </span>
                 {showTomorrow && (
                   <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -295,8 +309,7 @@ function Flies() {
                     ))}
                   </div>
                 )}
-              </div>
-            )}
+            </div>
           </div>
         )}
       </div>
