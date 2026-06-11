@@ -2,7 +2,62 @@ const { app } = require('@azure/functions');
 const { v4: uuidv4 } = require('uuid');
 const { getTable } = require('../shared/db');
 const { verifyToken, jsonResponse } = require('../shared/auth');
-const { predict } = require('../shared/flyDev');
+const { predict, planBackward, DEFAULT_SETTINGS } = require('../shared/flyDev');
+
+// ==================== FLY SETTINGS (tunable stage timings) ====================
+// One settings row per user in `flysettings` (PartitionKey=userId, RowKey='settings').
+async function getFlySettings(userId) {
+  try {
+    const table = await getTable('flysettings');
+    const e = await table.getEntity(userId, 'settings');
+    return {
+      ref_temp: e.refTemp != null ? Number(e.refTemp) : DEFAULT_SETTINGS.ref_temp,
+      lay_lag_days: e.layLagDays != null ? Number(e.layLagDays) : DEFAULT_SETTINGS.lay_lag_days,
+      days_to_L3: e.daysToL3 != null ? Number(e.daysToL3) : DEFAULT_SETTINGS.days_to_L3,
+      days_to_wandering_L3: e.daysToWanderingL3 != null ? Number(e.daysToWanderingL3) : DEFAULT_SETTINGS.days_to_wandering_L3,
+      days_to_pupa: e.daysToPupa != null ? Number(e.daysToPupa) : DEFAULT_SETTINGS.days_to_pupa,
+      days_to_new_adults: e.daysToNewAdults != null ? Number(e.daysToNewAdults) : DEFAULT_SETTINGS.days_to_new_adults,
+    };
+  } catch (err) {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+app.http('flySettingsGet', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'fly/settings',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+    try { return jsonResponse(200, await getFlySettings(decoded.id)); }
+    catch (e) { return jsonResponse(500, { error: e.message }); }
+  }
+});
+
+app.http('flySettingsPut', {
+  methods: ['PUT'], authLevel: 'anonymous', route: 'fly/settings',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+    try {
+      const body = await req.json();
+      const table = await getTable('flysettings');
+      const now = new Date().toISOString();
+      const num = (v, d) => (v != null && !isNaN(Number(v)) ? Number(v) : d);
+      const entity = {
+        partitionKey: decoded.id, rowKey: 'settings',
+        refTemp: num(body.ref_temp, DEFAULT_SETTINGS.ref_temp),
+        layLagDays: num(body.lay_lag_days, DEFAULT_SETTINGS.lay_lag_days),
+        daysToL3: num(body.days_to_L3, DEFAULT_SETTINGS.days_to_L3),
+        daysToWanderingL3: num(body.days_to_wandering_L3, DEFAULT_SETTINGS.days_to_wandering_L3),
+        daysToPupa: num(body.days_to_pupa, DEFAULT_SETTINGS.days_to_pupa),
+        daysToNewAdults: num(body.days_to_new_adults, DEFAULT_SETTINGS.days_to_new_adults),
+        updatedAt: now,
+      };
+      await table.upsertEntity(entity, 'Replace');
+      return jsonResponse(200, await getFlySettings(decoded.id));
+    } catch (e) { return jsonResponse(500, { error: e.message }); }
+  }
+});
 
 // ==================== FLY BOXES ====================
 
@@ -128,6 +183,8 @@ function formatVial(e) {
     transfer_interval_days: e.transferIntervalDays != null ? Number(e.transferIntervalDays) : 3,
     transfer_date: e.transferDate || null,   // manual override for next-transfer due date (parent-holder)
     snooze_until: e.snoozeUntil || null,     // attention items hidden until this date
+    desired_ready_date: e.desiredReadyDate || null,   // backward planner: want target stage ready by this date
+    planned_target_stage: e.plannedTargetStage || null, // backward planner: which stage to hit
     notes: e.notes || '',
     created_at: e.createdAt,
     updated_at: e.updatedAt,
@@ -158,6 +215,19 @@ function applyLineageSemantics(v) {
   return v;
 }
 
+// Backward planner: if the vial carries a desired_ready_date + planned_target_stage, compute the
+// date it should START (parents set) to hit that target, and how many days until that start day.
+// Attaches v.backward_plan = { start_date, ready_date, target_stage, days_needed, start_in_days }.
+function applyBackwardPlan(v, boxTemp, settings) {
+  if (!v.desired_ready_date || !v.planned_target_stage) { v.backward_plan = null; return v; }
+  const bp = planBackward({ targetStage: v.planned_target_stage, readyDate: v.desired_ready_date, boxTemp, settings });
+  if (!bp) { v.backward_plan = null; return v; }
+  const startMs = new Date(bp.start_date + 'T12:00:00').getTime();
+  const startInDays = Number(((startMs - Date.now()) / 86400000).toFixed(1));
+  v.backward_plan = { ...bp, start_in_days: startInDays };
+  return v;
+}
+
 async function getObservationsForVial(userId, vialId) {
   const table = await getTable('flyobservations');
   const items = [];
@@ -177,6 +247,7 @@ app.http('flyVialsGet', {
     if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
     try {
       const includeArchived = req.query.get('include_archived') === 'true';
+      const settings = await getFlySettings(decoded.id);
       const table = await getTable('flyvials');
       const boxes = await getBoxesMap(decoded.id);
       const obsTable = await getTable('flyobservations');
@@ -196,11 +267,12 @@ app.http('flyVialsGet', {
         v.box_name = box ? box.name : null;
         v.box_temperature = box ? box.temperature : null;
         if (v.type === 'cross') {
-          v.prediction = predict(v, box ? box.temperature : 22, obsByVial[v.id] || []);
+          v.prediction = predict(v, box ? box.temperature : 22, obsByVial[v.id] || [], null, settings);
           applyLineageSemantics(v);
         } else {
           v.prediction = null;
         }
+        applyBackwardPlan(v, box ? box.temperature : 22, settings);
         items.push(v);
       }
       items.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
@@ -226,8 +298,10 @@ app.http('flyVialGetOne', {
       v.box_name = box ? box.name : null;
       v.box_temperature = box ? box.temperature : null;
       v.observations = await getObservationsForVial(decoded.id, v.id);
-      v.prediction = v.type === 'cross' ? predict(v, box ? box.temperature : 22, v.observations) : null;
+      const settings = await getFlySettings(decoded.id);
+      v.prediction = v.type === 'cross' ? predict(v, box ? box.temperature : 22, v.observations, null, settings) : null;
       applyLineageSemantics(v);
+      applyBackwardPlan(v, box ? box.temperature : 22, settings);
       return jsonResponse(200, v);
     } catch (e) { return jsonResponse(500, { error: e.message }); }
   }
@@ -273,6 +347,8 @@ app.http('flyVialsCreate', {
         cohortNumber: 1,
         holdsParents: type === 'cross',
         transferIntervalDays: body.transfer_interval_days != null ? Number(body.transfer_interval_days) : 3,
+        desiredReadyDate: body.desired_ready_date || '',
+        plannedTargetStage: body.planned_target_stage || '',
         notes: body.notes || '',
         createdAt: now, updatedAt: now,
       };
@@ -298,6 +374,7 @@ app.http('flyVialsUpdate', {
         name: 'name', genotype: 'genotype', box_id: 'boxId', target_stage: 'targetStage',
         start_date: 'startDate', status: 'status', notes: 'notes',
         transfer_date: 'transferDate', snooze_until: 'snoozeUntil',
+        desired_ready_date: 'desiredReadyDate', planned_target_stage: 'plannedTargetStage',
       };
       for (const [k, ek] of Object.entries(map)) if (body[k] !== undefined) e[ek] = body[k];
       if (body.type !== undefined) e.vialType = body.type === 'stock' ? 'stock' : 'cross';
@@ -310,6 +387,30 @@ app.http('flyVialsUpdate', {
       e.updatedAt = new Date().toISOString();
       await table.updateEntity(e, 'Merge');
       return jsonResponse(200, formatVial(e));
+    } catch (e) { return jsonResponse(500, { error: e.message }); }
+  }
+});
+
+// GET /api/fly/plan?target=wandering_L3&ready=2026-06-20&box_id=...  (live backward-plan preview)
+app.http('flyPlanPreview', {
+  methods: ['GET'], authLevel: 'anonymous', route: 'fly/plan',
+  handler: async (req) => {
+    const decoded = verifyToken(req);
+    if (!decoded) return jsonResponse(401, { error: 'Unauthorized' });
+    try {
+      const target = req.query.get('target') || 'L3';
+      const ready = req.query.get('ready');
+      const boxId = req.query.get('box_id');
+      if (!ready) return jsonResponse(400, { error: 'ready date required' });
+      const settings = await getFlySettings(decoded.id);
+      let temp = 22;
+      if (boxId) { const boxes = await getBoxesMap(decoded.id); if (boxes[boxId]) temp = boxes[boxId].temperature; }
+      const bp = planBackward({ targetStage: target, readyDate: ready, boxTemp: temp, settings });
+      if (!bp) return jsonResponse(400, { error: 'Could not compute plan' });
+      const startMs = new Date(bp.start_date + 'T12:00:00').getTime();
+      bp.start_in_days = Number(((startMs - Date.now()) / 86400000).toFixed(1));
+      bp.box_temperature = temp;
+      return jsonResponse(200, bp);
     } catch (e) { return jsonResponse(500, { error: e.message }); }
   }
 });

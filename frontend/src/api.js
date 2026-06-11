@@ -108,6 +108,9 @@ export const flyAPI = {
   deleteVial: (id) => api.delete(`/fly/vials/${id}`),
   addObservation: (vialId, data) => api.post(`/fly/vials/${vialId}/observations`, data),
   deleteObservation: (vialId, obsId) => api.delete(`/fly/vials/${vialId}/observations/${obsId}`),
+  getSettings: () => api.get('/fly/settings'),
+  updateSettings: (data) => api.put('/fly/settings', data),
+  planPreview: (params) => api.get('/fly/plan', { params }),
 };
 
 // Replicates

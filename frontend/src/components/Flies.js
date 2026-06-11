@@ -46,9 +46,13 @@ function Flies() {
   const [showTomorrow, setShowTomorrow] = useState(false); // quiet "preview tomorrow" peek
   const [transferEdit, setTransferEdit] = useState(null);  // vial whose transfer date we're editing
   const [transferDateInput, setTransferDateInput] = useState(todayStr());
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(null);
+  const [settingsForm, setSettingsForm] = useState(null);
+  const [planPreview, setPlanPreview] = useState(null); // live backward-plan preview in tube form
 
   function emptyVialForm() {
-    return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: todayStr(), flip_interval_days: 21 };
+    return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: todayStr(), flip_interval_days: 21, desired_ready_date: '', planned_target_stage: '' };
   }
 
   const fetchData = useCallback(async () => {
@@ -64,12 +68,32 @@ function Flies() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { flyAPI.getSettings().then(r => setSettings(r.data)).catch(() => {}); }, []);
+
+  // ----- Settings (tunable stage timings) -----
+  const openSettings = () => { setSettingsForm({ ...(settings || {}) }); setShowSettings(true); };
+  const saveSettings = async () => {
+    try {
+      const r = await flyAPI.updateSettings(settingsForm);
+      setSettings(r.data); setShowSettings(false); setLoading(true); fetchData();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to save settings'); }
+  };
+
+  // ----- Backward-plan live preview in the tube form -----
+  useEffect(() => {
+    if (!showVialModal || !vialForm.desired_ready_date) { setPlanPreview(null); return; }
+    let active = true;
+    const target = vialForm.planned_target_stage || vialForm.target_stage || 'L3';
+    flyAPI.planPreview({ target, ready: vialForm.desired_ready_date, box_id: vialForm.box_id || undefined })
+      .then(r => { if (active) setPlanPreview(r.data); }).catch(() => { if (active) setPlanPreview(null); });
+    return () => { active = false; };
+  }, [showVialModal, vialForm.desired_ready_date, vialForm.planned_target_stage, vialForm.target_stage, vialForm.box_id]);
 
   // ----- Vial CRUD -----
   const openAddVial = () => { setEditingVial(null); setVialForm({ ...emptyVialForm(), box_id: boxes[0]?.id || '' }); setShowVialModal(true); };
   const openEditVial = (v) => {
     setEditingVial(v);
-    setVialForm({ name: v.name, type: v.type, genotype: v.genotype || '', box_id: v.box_id || '', target_stage: v.target_stage || 'L3', start_date: v.start_date || todayStr(), flip_interval_days: v.flip_interval_days || 21 });
+    setVialForm({ name: v.name, type: v.type, genotype: v.genotype || '', box_id: v.box_id || '', target_stage: v.target_stage || 'L3', start_date: v.start_date || todayStr(), flip_interval_days: v.flip_interval_days || 21, desired_ready_date: v.desired_ready_date || '', planned_target_stage: v.planned_target_stage || '' });
     setShowVialModal(true);
   };
   const saveVial = async () => {
@@ -197,6 +221,12 @@ function Flies() {
         rawItems.push({ vial: v, kind: 'transfer', due: p.transfer_due_in_days,
           text: `Transfer parents (${-Math.round(p.transfer_due_in_days)}d overdue)` });
     }
+    // Backward-plan "start by" reminder — surfaces when it's time to set this cross/tube.
+    if (v.backward_plan && v.backward_plan.start_in_days != null && v.backward_plan.start_in_days <= 0.5) {
+      const bp = v.backward_plan;
+      rawItems.push({ vial: v, kind: 'start', due: bp.start_in_days,
+        text: bp.start_in_days < -0.5 ? `⏰ Should've started ${-Math.round(bp.start_in_days)}d ago for ${stageLabel(bp.target_stage)} by ${bp.ready_date}` : `⏰ Start today → ${stageLabel(bp.target_stage)} by ${bp.ready_date}` });
+    }
   });
   // Split into today (due <= 0.5) and tomorrow (the rest, <= 1.5).
   // Tomorrow peek also pulls cross target/clear-parents/flip items landing within ~2 days
@@ -217,9 +247,10 @@ function Flies() {
   });
   tomorrowItems.sort((a, b) => a.due - b.due);
   // Summary counts (today only).
-  const counts = { target: 0, transfer: 0, parents: 0, flip: 0 };
+  const counts = { target: 0, transfer: 0, parents: 0, flip: 0, start: 0 };
   todayItems.forEach(i => { counts[i.kind] = (counts[i.kind] || 0) + 1; });
   const summaryChips = [
+    counts.start && `⏰ ${counts.start} to start`,
     counts.target && `🎯 ${counts.target} window${counts.target > 1 ? 's' : ''} open`,
     counts.parents && `👪 ${counts.parents} clear-parents`,
     counts.transfer && `🔄 ${counts.transfer} transfer${counts.transfer > 1 ? 's' : ''} overdue`,
@@ -238,7 +269,7 @@ function Flies() {
   });
   // Sort groups: most-urgent (lowest due) first.
   attnOrder.sort((a, b) => Math.min(...attnGroups[a].items.map(i => i.due)) - Math.min(...attnGroups[b].items.map(i => i.due)));
-  const kindColor = (k) => ({ parents: '#c0392b', transfer: '#9b59b6', target: '#b9770e', flip: '#16a085' }[k] || '#555');
+  const kindColor = (k) => ({ parents: '#c0392b', transfer: '#9b59b6', target: '#b9770e', flip: '#16a085', start: '#2980b9' }[k] || '#555');
 
   return (
     <div>
@@ -247,6 +278,7 @@ function Flies() {
         <div className="card-header">
           <h2>🪰 Drosophila Manager ({vials.length} tube{vials.length !== 1 ? 's' : ''})</h2>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={openSettings} title="Tune stage timings">⚙️ Timings</button>
             <button className="btn btn-secondary" onClick={openAddBox}>+ Box</button>
             <button className="btn btn-primary" onClick={openAddVial} disabled={boxes.length === 0}>+ Tube</button>
           </div>
@@ -376,6 +408,28 @@ function Flies() {
             ) : (
               <div className="form-group"><label>Flip every (days)</label><input type="number" value={vialForm.flip_interval_days} onChange={(e) => setVialForm({ ...vialForm, flip_interval_days: e.target.value })} /></div>
             )}
+
+            {/* Backward planner: want a stage ready by a date → tells you when to start */}
+            <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 6, paddingTop: 10 }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#2980b9', marginBottom: 6 }}>🎯 Plan backward (optional)</div>
+              <div className="form-row">
+                <div className="form-group"><label>Want ready by</label><input type="date" value={vialForm.desired_ready_date} onChange={(e) => setVialForm({ ...vialForm, desired_ready_date: e.target.value })} /></div>
+                <div className="form-group"><label>Stage to have ready</label>
+                  <select value={vialForm.planned_target_stage || vialForm.target_stage} onChange={(e) => setVialForm({ ...vialForm, planned_target_stage: e.target.value })}>
+                    {STAGES.filter(s => s.value !== 'new_tube').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              {vialForm.desired_ready_date && planPreview && (
+                <div style={{ fontSize: '0.82rem', background: '#eaf4fb', border: '1px solid #c5e0f0', borderRadius: 8, padding: '8px 10px', color: '#1f618d' }}>
+                  Start (parents set) by <strong>{planPreview.start_date}</strong> — ~{planPreview.days_needed}d at {planPreview.box_temperature}°C.
+                  {planPreview.start_in_days <= 0 ? ' That’s today or past — start ASAP!' : ` (${planPreview.start_in_days}d from now)`}
+                  <div style={{ color: '#7a9bb3', marginTop: 2 }}>You’ll get a “start today” reminder up top when the day comes.</div>
+                </div>
+              )}
+              {vialForm.desired_ready_date && !planPreview && <div style={{ fontSize: '0.78rem', color: '#aaa' }}>Pick a box to see the start date.</div>}
+            </div>
+
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowVialModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveVial}>{editingVial ? 'Save' : 'Create'}</button>
@@ -395,6 +449,32 @@ function Flies() {
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowBoxModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveBox}>{editingBox ? 'Save' : 'Create'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings: tunable stage timings */}
+      {showSettings && settingsForm && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <h2>⚙️ Stage timings</h2>
+            <p style={{ color: '#666', marginBottom: 12, fontSize: '0.88rem' }}>Days from egg-lay to each stage at the reference temperature. These drive all predictions and backward planning — tweak them if you notice your crosses run faster/slower than predicted.</p>
+            <div className="form-row">
+              <div className="form-group"><label>Reference temp (°C)</label><input type="number" step="any" value={settingsForm.ref_temp} onChange={(e) => setSettingsForm({ ...settingsForm, ref_temp: e.target.value })} /></div>
+              <div className="form-group"><label>Lay lag (days)</label><input type="number" step="any" value={settingsForm.lay_lag_days} onChange={(e) => setSettingsForm({ ...settingsForm, lay_lag_days: e.target.value })} /><small style={{ color: '#999' }}>parents-set → egg-lay</small></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>🐛 Days to L3</label><input type="number" step="any" value={settingsForm.days_to_L3} onChange={(e) => setSettingsForm({ ...settingsForm, days_to_L3: e.target.value })} /></div>
+              <div className="form-group"><label>🚶 Days to wandering L3</label><input type="number" step="any" value={settingsForm.days_to_wandering_L3} onChange={(e) => setSettingsForm({ ...settingsForm, days_to_wandering_L3: e.target.value })} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>🛡️ Days to pupa</label><input type="number" step="any" value={settingsForm.days_to_pupa} onChange={(e) => setSettingsForm({ ...settingsForm, days_to_pupa: e.target.value })} /></div>
+              <div className="form-group"><label>🪰 Days to new adults</label><input type="number" step="any" value={settingsForm.days_to_new_adults} onChange={(e) => setSettingsForm({ ...settingsForm, days_to_new_adults: e.target.value })} /></div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveSettings}>Save</button>
             </div>
           </div>
         </div>
@@ -511,6 +591,9 @@ function Flies() {
               {v.snooze_until && v.snooze_until > todayStr() && <span style={{ fontSize: '0.72rem', color: '#9b59b6', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); flyAPI.updateVial(v.id, { snooze_until: '' }).then(() => { setLoading(true); fetchData(); }); }} title="Snoozed — click to un-snooze">💤 until {v.snooze_until} ✕</span>}
             </div>
             {v.genotype && <div style={{ fontSize: '0.8rem', color: '#888' }}>{v.genotype}</div>}
+            {v.backward_plan && v.backward_plan.start_in_days > 0.5 && (
+              <div style={{ fontSize: '0.78rem', color: '#2980b9', marginTop: 2 }}>🎯 start by {v.backward_plan.start_date} for {stageLabel(v.backward_plan.target_stage)} by {v.backward_plan.ready_date} ({v.backward_plan.start_in_days}d)</div>
+            )}
             {v.type === 'cross' && p && (
               <div style={{ fontSize: '0.8rem', color: '#666', marginTop: 2 }}>
                 {p.eta_to_target_days != null && <span>🎯 {stageLabel(p.target_stage)} {p.eta_to_target_days <= 0 ? 'now' : `~${p.eta_to_target_days}d`}</span>}

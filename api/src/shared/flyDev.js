@@ -19,6 +19,33 @@ const BASE_DAYS_25 = 10;
 // Default lag (days) from "parents set" to effective egg lay onset.
 const DEFAULT_LAY_LAG_DAYS = 2;
 
+// User-editable timing settings expressed as DAYS-from-egg-lay at the reference temp (25C).
+// McKenzie tunes these when she notices discrepancies; everything (prediction + backward
+// planning) derives from them. Defaults match the standard curve above.
+const DEFAULT_SETTINGS = {
+  ref_temp: 25,
+  lay_lag_days: DEFAULT_LAY_LAG_DAYS,
+  days_to_L3: 3.5,          // egg-lay -> L3 onset at 25C
+  days_to_wandering_L3: 4.5,
+  days_to_pupa: 5,
+  days_to_new_adults: 10,   // = total egg->adult at 25C
+};
+
+// Build the STAGE_FRACTION map + base days from a settings object (day-milestones at ref temp).
+// Fractions are days_to_stage / days_to_new_adults so the 0..1 axis stays consistent.
+function deriveModel(settings) {
+  const s = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+  const total = Number(s.days_to_new_adults) || BASE_DAYS_25;
+  const frac = {
+    new_tube: 0,
+    L3: (Number(s.days_to_L3) || 0) / total,
+    wandering_L3: (Number(s.days_to_wandering_L3) || 0) / total,
+    pupa: (Number(s.days_to_pupa) || 0) / total,
+    new_adults: 1,
+  };
+  return { fraction: frac, baseDays: total, layLag: Number(s.lay_lag_days) || 0, refTemp: Number(s.ref_temp) || 25 };
+}
+
 // Development rate factor vs 25C, by temperature (C). Interpolated.
 // Higher factor = faster development. Based on standard Drosophila timing.
 const TEMP_FACTORS = [
@@ -54,14 +81,15 @@ function daysBetween(aIso, bIso) {
   return (b - a) / (1000 * 60 * 60 * 24);
 }
 
-// Map a developmental fraction back to the nearest stage label (and whether between stages).
-function fractionToStage(frac) {
+// Map a developmental fraction back to the nearest stage label, using a fraction map.
+function fractionToStage(frac, fracMap) {
+  const FR = fracMap || STAGE_FRACTION;
   if (frac <= 0) return 'new_tube';
   let current = 'new_tube';
   for (const s of STAGE_ORDER) {
-    if (frac >= STAGE_FRACTION[s] - 1e-9) current = s;
+    if (frac >= FR[s] - 1e-9) current = s;
   }
-  if (frac >= STAGE_FRACTION.new_adults) return 'new_adults';
+  if (frac >= FR.new_adults) return 'new_adults';
   return current;
 }
 
@@ -95,8 +123,12 @@ function fitRate(anchors) {
 }
 
 // Predict current stage + ETA to target.
-// vial: { start_date, target_stage }; boxTemp; observations: [{observed_at, stage_seen}]; nowIso
-function predict(vial, boxTemp, observations, nowIso) {
+// vial: { start_date, target_stage }; boxTemp; observations: [{observed_at, stage_seen}]; nowIso; settings
+function predict(vial, boxTemp, observations, nowIso, settings) {
+  const model = deriveModel(settings);
+  const FR = model.fraction;
+  const baseDays = model.baseDays;
+  const defaultLayLag = model.layLag;
   const now = nowIso || new Date().toISOString();
   const start = vial.start_date;
   if (!start) return { predicted_stage: null, confidence: 'none', note: 'No start date' };
@@ -105,8 +137,8 @@ function predict(vial, boxTemp, observations, nowIso) {
   if (elapsedNow == null || elapsedNow < 0) return { predicted_stage: 'new_tube', confidence: 'low' };
 
   const obs = (observations || [])
-    .filter(o => o.observed_at && STAGE_FRACTION[o.stage_seen] != null)
-    .map(o => ({ elapsedDays: daysBetween(start, o.observed_at), fraction: STAGE_FRACTION[o.stage_seen], stage: o.stage_seen }))
+    .filter(o => o.observed_at && FR[o.stage_seen] != null)
+    .map(o => ({ elapsedDays: daysBetween(start, o.observed_at), fraction: FR[o.stage_seen], stage: o.stage_seen }))
     .filter(o => o.elapsedDays != null);
 
   let slope, layLag, mode, n;
@@ -115,10 +147,10 @@ function predict(vial, boxTemp, observations, nowIso) {
     slope = fit.slope; layLag = fit.layLagDays; n = fit.n;
     mode = n >= 2 ? 'calibrated' : 'single-obs';
   } else {
-    // Baseline: temp-adjusted standard curve. dev_fraction per day = factor / BASE_DAYS_25.
-    const factor = devRateFactor(boxTemp);
-    slope = factor / BASE_DAYS_25;
-    layLag = DEFAULT_LAY_LAG_DAYS;
+    // Baseline: temp-adjusted standard curve. dev_fraction per day = factor / baseDays.
+    const factor = devRateFactor(boxTemp) / devRateFactor(model.refTemp);
+    slope = factor / baseDays;
+    layLag = defaultLayLag;
     mode = 'baseline';
     n = 0;
   }
@@ -144,11 +176,11 @@ function predict(vial, boxTemp, observations, nowIso) {
     fracNow = Math.max(fracNow, maxObsFrac);
   }
 
-  const predictedStage = fractionToStage(fracNow);
+  const predictedStage = fractionToStage(fracNow, FR);
 
   // ETA to target stage. If already at/past the target, ETA = 0 (window open now).
   const target = vial.target_stage || 'L3';
-  const targetFrac = STAGE_FRACTION[target] != null ? STAGE_FRACTION[target] : STAGE_FRACTION.L3;
+  const targetFrac = FR[target] != null ? FR[target] : FR.L3;
   let etaDays = null;
   if (fracNow >= targetFrac) {
     etaDays = 0;
@@ -160,12 +192,12 @@ function predict(vial, boxTemp, observations, nowIso) {
   // "Clear parents by" for crosses: ~2 days before predicted new_adults (first eclosion).
   let clearParentsInDays = null;
   if (vial.type === 'cross' && slope > 0) {
-    const elapsedAtAdults = STAGE_FRACTION.new_adults / slope + layLag;
+    const elapsedAtAdults = FR.new_adults / slope + layLag;
     clearParentsInDays = (elapsedAtAdults - 2) - elapsedNow;
   }
 
-  // Factor vs 25C standard (for "running 1.4x slower" messaging)
-  const standardSlope = devRateFactor(25) / BASE_DAYS_25;
+  // Factor vs reference-temp standard (for "running 1.4x slower" messaging)
+  const standardSlope = 1 / baseDays;
   const speedVsStandard = standardSlope > 0 ? slope / standardSlope : null;
 
   return {
@@ -182,4 +214,31 @@ function predict(vial, boxTemp, observations, nowIso) {
   };
 }
 
-module.exports = { STAGE_FRACTION, STAGE_ORDER, BASE_DAYS_25, devRateFactor, predict, fitRate, daysBetween };
+// Backward planner: given a desired ready date + target stage + box temp, compute the date the
+// cross/tube must START (parents set) to hit that target on time. Uses the BASELINE temp model
+// (per McKenzie: most crosses grow at standard rate; she tunes the milestone days in settings).
+// Returns { start_date, days_needed, ready_date, target_stage } or null.
+function planBackward({ targetStage, readyDate, boxTemp, settings }) {
+  if (!readyDate) return null;
+  const model = deriveModel(settings);
+  const FR = model.fraction;
+  const target = FR[targetStage] != null ? targetStage : 'L3';
+  const targetFrac = FR[target];
+  const factor = devRateFactor(boxTemp) / devRateFactor(model.refTemp);
+  const slope = factor / model.baseDays;            // dev fraction per day at this temp
+  if (slope <= 0) return null;
+  // elapsed from start (parents set) to target = targetFrac/slope + layLag
+  const daysNeeded = targetFrac / slope + model.layLag;
+  const ready = new Date(readyDate + 'T12:00:00');
+  if (isNaN(ready.getTime())) return null;
+  const startMs = ready.getTime() - daysNeeded * 86400000;
+  const startDate = new Date(startMs).toISOString().split('T')[0];
+  return {
+    start_date: startDate,
+    days_needed: Number(daysNeeded.toFixed(1)),
+    ready_date: readyDate,
+    target_stage: target,
+  };
+}
+
+module.exports = { STAGE_FRACTION, STAGE_ORDER, BASE_DAYS_25, DEFAULT_SETTINGS, deriveModel, devRateFactor, predict, planBackward, fitRate, daysBetween };
