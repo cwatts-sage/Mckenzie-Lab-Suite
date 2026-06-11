@@ -42,6 +42,10 @@ function Flies() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [expandedLineage, setExpandedLineage] = useState(null);
+  const [attnOpen, setAttnOpen] = useState(true);     // attention detail list expanded?
+  const [showTomorrow, setShowTomorrow] = useState(false); // quiet "preview tomorrow" peek
+  const [transferEdit, setTransferEdit] = useState(null);  // vial whose transfer date we're editing
+  const [transferDateInput, setTransferDateInput] = useState(todayStr());
 
   function emptyVialForm() {
     return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: todayStr(), flip_interval_days: 21 };
@@ -94,6 +98,18 @@ function Flies() {
     if (!window.confirm(`Transfer the parents from "${v.name}" into a fresh tube today? This creates the next staggered cohort and leaves this tube to keep developing.`)) return;
     try { await flyAPI.transferVial(v.id, { transfer_date: todayStr() }); setLoading(true); fetchData(); }
     catch (err) { alert(err.response?.data?.error || 'Failed to transfer'); }
+  };
+  // Snooze any attention item on a vial: hide it from Attention until +N days.
+  const snoozeVial = async (v, days = 1) => {
+    const until = new Date(); until.setDate(until.getDate() + days);
+    const untilStr = until.toISOString().split('T')[0];
+    try { await flyAPI.updateVial(v.id, { snooze_until: untilStr }); setLoading(true); fetchData(); }
+    catch (err) { alert('Failed to snooze'); }
+  };
+  const openTransferEdit = (v) => { setTransferDateInput(v.transfer_date || todayStr()); setTransferEdit(v); };
+  const saveTransferDate = async () => {
+    try { await flyAPI.updateVial(transferEdit.id, { transfer_date: transferDateInput }); setTransferEdit(null); setLoading(true); fetchData(); }
+    catch (err) { alert('Failed to set transfer date'); }
   };
 
   // ----- Observations -----
@@ -157,21 +173,57 @@ function Flies() {
   const byBox = {};
   vials.forEach(v => { const k = v.box_id || 'unassigned'; (byBox[k] = byBox[k] || []).push(v); });
 
-  // Attention list
-  const attention = [];
+  // ---- Attention model (grouped by cross, tiered today/tomorrow, snooze-aware) ----
+  // An item's `due` is days-from-now (<=0.5 => "now", <=1.5 => "tomorrow"). Anything
+  // further out lives on the tube card, not here. Transfer only shows when OVERDUE.
+  const todayISO = todayStr();
+  const isSnoozed = (v) => v.snooze_until && v.snooze_until > todayISO;
+  const rawItems = [];
   vials.forEach(v => {
+    if (isSnoozed(v)) return;
     const fd = flipDueInfo(v);
-    if (fd && fd.days <= 3) attention.push({ vial: v, kind: 'flip', text: fd.days < 0 ? `Flip overdue (${-fd.days}d)` : fd.days === 0 ? 'Flip due today' : `Flip in ${fd.days}d` });
+    if (fd && fd.days <= 1) rawItems.push({ vial: v, kind: 'flip', due: fd.days,
+      text: fd.days < 0 ? `Flip overdue ${-fd.days}d` : fd.days === 0 ? 'Flip due today' : 'Flip tomorrow' });
     if (v.type === 'cross' && v.prediction) {
       const p = v.prediction;
       if (p.eta_to_target_days != null && p.eta_to_target_days <= 1.5 && p.eta_to_target_days >= -2)
-        attention.push({ vial: v, kind: 'target', text: p.eta_to_target_days <= 0 ? `${stageLabel(p.target_stage)} window open now` : `${stageLabel(p.target_stage)} in ~${p.eta_to_target_days}d` });
-      if (p.clear_parents_in_days != null && p.clear_parents_in_days <= 2 && p.clear_parents_in_days >= -3)
-        attention.push({ vial: v, kind: 'parents', text: p.clear_parents_in_days <= 0 ? '⚠️ Clear parents now!' : `Clear parents in ~${p.clear_parents_in_days}d` });
-      if (v.holds_parents && p.transfer_due_in_days != null && p.transfer_due_in_days <= 0.5)
-        attention.push({ vial: v, kind: 'transfer', text: p.transfer_due_in_days < 0 ? `Transfer parents (${-Math.round(p.transfer_due_in_days)}d overdue)` : 'Transfer parents to a fresh tube' });
+        rawItems.push({ vial: v, kind: 'target', due: Math.max(0, p.eta_to_target_days),
+          text: p.eta_to_target_days <= 0.5 ? `${stageLabel(p.target_stage)} window open` : `${stageLabel(p.target_stage)} window tomorrow` });
+      if (p.clear_parents_in_days != null && p.clear_parents_in_days <= 1.5 && p.clear_parents_in_days >= -3)
+        rawItems.push({ vial: v, kind: 'parents', due: p.clear_parents_in_days,
+          text: p.clear_parents_in_days <= 0.5 ? '⚠️ Clear parents' : 'Clear parents tomorrow' });
+      // Transfer ONLY when overdue (negative days). Recurring on-schedule nudge stays off the alert list.
+      if (v.holds_parents && p.transfer_due_in_days != null && p.transfer_due_in_days < 0)
+        rawItems.push({ vial: v, kind: 'transfer', due: p.transfer_due_in_days,
+          text: `Transfer parents (${-Math.round(p.transfer_due_in_days)}d overdue)` });
     }
   });
+  // Split into today (due <= 0.5) and tomorrow (the rest, <= 1.5).
+  const todayItems = rawItems.filter(i => i.due <= 0.5);
+  const tomorrowItems = rawItems.filter(i => i.due > 0.5);
+  // Summary counts (today only).
+  const counts = { target: 0, transfer: 0, parents: 0, flip: 0 };
+  todayItems.forEach(i => { counts[i.kind] = (counts[i.kind] || 0) + 1; });
+  const summaryChips = [
+    counts.target && `🎯 ${counts.target} window${counts.target > 1 ? 's' : ''} open`,
+    counts.parents && `👪 ${counts.parents} clear-parents`,
+    counts.transfer && `🔄 ${counts.transfer} transfer${counts.transfer > 1 ? 's' : ''} overdue`,
+    counts.flip && `🧪 ${counts.flip} flip${counts.flip > 1 ? 's' : ''}`,
+  ].filter(Boolean);
+  // Group today's items by cross lineage (stocks group as themselves).
+  const groupKey = (v) => (v.type === 'cross' ? (v.lineage_id || v.id) : `stock:${v.id}`);
+  const groupName = (v) => (v.type === 'cross'
+    ? (v.name || 'Cross').replace(/\s*[\u2014-]\s*set\s*[\d.]+\s*$/i, '').trim()
+    : v.name);
+  const attnGroups = {}; const attnOrder = [];
+  todayItems.forEach(i => {
+    const k = groupKey(i.vial);
+    if (!attnGroups[k]) { attnGroups[k] = { name: groupName(i.vial), items: [] }; attnOrder.push(k); }
+    attnGroups[k].items.push(i);
+  });
+  // Sort groups: most-urgent (lowest due) first.
+  attnOrder.sort((a, b) => Math.min(...attnGroups[a].items.map(i => i.due)) - Math.min(...attnGroups[b].items.map(i => i.due)));
+  const kindColor = (k) => ({ parents: '#c0392b', transfer: '#9b59b6', target: '#b9770e', flip: '#16a085' }[k] || '#555');
 
   return (
     <div>
@@ -187,15 +239,64 @@ function Flies() {
         {boxes.length === 0 && (
           <div className="empty-state"><div className="emoji">📦</div><p>Add a box first (with its temperature), then start adding tubes.</p></div>
         )}
-        {attention.length > 0 && (
+        {(todayItems.length > 0 || tomorrowItems.length > 0) && (
           <div style={{ background: '#fff8e1', border: '1px solid #ffe0a3', borderRadius: 8, padding: '10px 14px', marginTop: 8 }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b9770e', textTransform: 'uppercase', marginBottom: 6 }}>⏰ Needs attention</div>
-            {attention.map((a, i) => (
-              <div key={i} style={{ fontSize: '0.88rem', padding: '3px 0', display: 'flex', gap: 8 }}>
-                <strong>{a.vial.name}</strong>
-                <span style={{ color: a.kind === 'parents' ? '#c0392b' : '#555' }}>{a.text}</span>
+            {/* Summary bar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', cursor: todayItems.length ? 'pointer' : 'default' }}
+              onClick={() => todayItems.length && setAttnOpen(o => !o)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b9770e', textTransform: 'uppercase' }}>⏰ Today</span>
+                {summaryChips.length > 0 ? summaryChips.map((c, i) => (
+                  <span key={i} style={{ fontSize: '0.78rem', background: '#fff', border: '1px solid #ffd98a', borderRadius: 12, padding: '2px 9px', color: '#8a5a00', fontWeight: 600 }}>{c}</span>
+                )) : <span style={{ fontSize: '0.82rem', color: '#999' }}>Nothing due today 🎉</span>}
               </div>
-            ))}
+              {todayItems.length > 0 && <span style={{ color: '#b9770e', fontSize: '0.8rem' }}>{attnOpen ? '▲' : '▼'}</span>}
+            </div>
+
+            {/* Grouped today detail */}
+            {attnOpen && attnOrder.length > 0 && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {attnOrder.map(k => {
+                  const grp = attnGroups[k];
+                  return (
+                    <div key={k} style={{ background: '#fff', border: '1px solid #f0e3c2', borderRadius: 8, padding: '7px 10px' }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: 3 }}>{grp.items[0].vial.type === 'cross' ? '⚗️' : '🧪'} {grp.name}</div>
+                      {grp.items.map((a, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: '0.85rem', padding: '2px 0' }}>
+                          <span style={{ color: kindColor(a.kind) }}>
+                            {a.vial.cohort_number > 1 || a.vial.lineage_id !== a.vial.id ? <span style={{ color: '#aaa' }}>set {setLabel(a.vial)} · </span> : null}
+                            {a.text}
+                          </span>
+                          <span style={{ display: 'flex', gap: 4 }}>
+                            {a.kind === 'transfer' && <button className="btn btn-sm btn-secondary" style={{ padding: '1px 7px', fontSize: '0.72rem' }} onClick={() => openTransferEdit(a.vial)} title="Edit the next transfer date">📅</button>}
+                            <button className="btn btn-sm btn-secondary" style={{ padding: '1px 7px', fontSize: '0.72rem' }} onClick={() => snoozeVial(a.vial, 1)} title="Snooze 1 day">💤</button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Quiet tomorrow peek */}
+            {tomorrowItems.length > 0 && (
+              <div style={{ marginTop: 8, borderTop: '1px dashed #ffe0a3', paddingTop: 6 }}>
+                <span style={{ fontSize: '0.76rem', color: '#b08a3a', cursor: 'pointer' }} onClick={() => setShowTomorrow(s => !s)}>
+                  {showTomorrow ? '▲ hide' : `▼ preview tomorrow (${tomorrowItems.length})`}
+                </span>
+                {showTomorrow && (
+                  <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {tomorrowItems.map((a, i) => (
+                      <div key={i} style={{ fontSize: '0.8rem', color: '#999', display: 'flex', gap: 6 }}>
+                        <strong style={{ color: '#888' }}>{groupName(a.vial)}{a.vial.cohort_number > 1 ? ` (set ${setLabel(a.vial)})` : ''}</strong>
+                        <span>{a.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -320,6 +421,21 @@ function Flies() {
         </div>
       )}
 
+      {/* Transfer-date override modal */}
+      {transferEdit && (
+        <div className="modal-overlay" onClick={() => setTransferEdit(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 380 }}>
+            <h2>Next transfer date</h2>
+            <p style={{ color: '#666', marginBottom: 12 }}><strong>{transferEdit.name}</strong> — set when you plan to move these parents to a fresh tube. The nudge will count down to this date.</p>
+            <div className="form-group"><label>Transfer on</label><input type="date" value={transferDateInput} onChange={(e) => setTransferDateInput(e.target.value)} /></div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setTransferEdit(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveTransferDate}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deleteTarget && (
         <DeleteConfirmModal itemName={`tube "${deleteTarget.name}" and its observations`} onConfirm={doDeleteVial} onCancel={() => setDeleteTarget(null)} />
       )}
@@ -379,6 +495,7 @@ function Flies() {
               {inGroup && v.holds_parents && <span style={{ fontSize: '0.7rem', background: '#9b59b6', color: 'white', padding: '1px 6px', borderRadius: 8 }}>has parents</span>}
               {v.type === 'cross' && predBadge(p)}
               {v.type === 'stock' && fd && <span style={{ fontSize: '0.78rem', color: fd.days <= 0 ? '#c0392b' : fd.days <= 3 ? '#e67e22' : '#888' }}>🔄 {fd.days < 0 ? `overdue ${-fd.days}d` : fd.days === 0 ? 'flip today' : `flip in ${fd.days}d`}</span>}
+              {v.snooze_until && v.snooze_until > todayStr() && <span style={{ fontSize: '0.72rem', color: '#9b59b6', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); flyAPI.updateVial(v.id, { snooze_until: '' }).then(() => { setLoading(true); fetchData(); }); }} title="Snoozed — click to un-snooze">💤 until {v.snooze_until} ✕</span>}
             </div>
             {v.genotype && <div style={{ fontSize: '0.8rem', color: '#888' }}>{v.genotype}</div>}
             {v.type === 'cross' && p && (

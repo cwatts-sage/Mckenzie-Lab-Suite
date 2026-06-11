@@ -126,6 +126,8 @@ function formatVial(e) {
     holds_parents: e.holdsParents === false || e.holdsParents === 'false' ? false : true, // current parent-holding tube?
     parents_removed_date: e.parentsRemovedDate || null,
     transfer_interval_days: e.transferIntervalDays != null ? Number(e.transferIntervalDays) : 3,
+    transfer_date: e.transferDate || null,   // manual override for next-transfer due date (parent-holder)
+    snooze_until: e.snoozeUntil || null,     // attention items hidden until this date
     notes: e.notes || '',
     created_at: e.createdAt,
     updated_at: e.updatedAt,
@@ -140,11 +142,17 @@ function applyLineageSemantics(v) {
   if (!v.holds_parents) {
     v.prediction.clear_parents_in_days = null; // parents already gone from this cohort
   } else {
-    // Transfer nudge: days since this cohort started vs the transfer interval.
-    const interval = v.transfer_interval_days || 3;
-    if (v.start_date) {
-      const days = Math.floor((Date.now() - new Date(v.start_date + 'T12:00:00').getTime()) / 86400000);
-      v.prediction.transfer_due_in_days = Number((interval - days).toFixed(1));
+    // Transfer nudge. If a manual transfer_date override is set, count down to that.
+    // Otherwise: days since this cohort started vs the transfer interval.
+    if (v.transfer_date) {
+      const days = Math.floor((new Date(v.transfer_date + 'T12:00:00').getTime() - Date.now()) / 86400000);
+      v.prediction.transfer_due_in_days = Number(days.toFixed(1));
+    } else {
+      const interval = v.transfer_interval_days || 3;
+      if (v.start_date) {
+        const days = Math.floor((Date.now() - new Date(v.start_date + 'T12:00:00').getTime()) / 86400000);
+        v.prediction.transfer_due_in_days = Number((interval - days).toFixed(1));
+      }
     }
   }
   return v;
@@ -289,6 +297,7 @@ app.http('flyVialsUpdate', {
       const map = {
         name: 'name', genotype: 'genotype', box_id: 'boxId', target_stage: 'targetStage',
         start_date: 'startDate', status: 'status', notes: 'notes',
+        transfer_date: 'transferDate', snooze_until: 'snoozeUntil',
       };
       for (const [k, ek] of Object.entries(map)) if (body[k] !== undefined) e[ek] = body[k];
       if (body.type !== undefined) e.vialType = body.type === 'stock' ? 'stock' : 'cross';
