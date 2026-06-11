@@ -12,6 +12,9 @@ const STAGES = [
 const stageLabel = (v) => (STAGES.find(s => s.value === v) || {}).short || v;
 
 const todayStr = () => new Date().toISOString().split('T')[0];
+// "Upcoming" = a cross whose parents-set date is still in the future (not started yet).
+const isUpcoming = (v) => v.type === 'cross' && v.start_date && v.start_date > todayStr();
+const UPCOMING_COLOR = '#2980b9';
 // Date-based "set" label: month.day, no year (e.g. "6.4"). Falls back to cohort number.
 const setLabel = (v) => {
   if (v.start_date) {
@@ -221,8 +224,15 @@ function Flies() {
         rawItems.push({ vial: v, kind: 'transfer', due: p.transfer_due_in_days,
           text: `Transfer parents (${-Math.round(p.transfer_due_in_days)}d overdue)` });
     }
-    // Backward-plan "start by" reminder — surfaces when it's time to set this cross/tube.
-    if (v.backward_plan && v.backward_plan.start_in_days != null && v.backward_plan.start_in_days <= 0.5) {
+    // "Set this cross" reminder for an upcoming (not-yet-started) cross: fire on the parents-set day.
+    if (isUpcoming(v) && v.start_date) {
+      const setIn = Math.round((new Date(v.start_date + 'T12:00:00') - Date.now()) / 86400000);
+      if (setIn <= 0) {
+        const tail = v.backward_plan ? ` for ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : '';
+        rawItems.push({ vial: v, kind: 'start', due: setIn, text: `⏰ Set this cross today${tail}` });
+      }
+    } else if (v.backward_plan && v.backward_plan.start_in_days != null && v.backward_plan.start_in_days <= 0.5) {
+      // Planned-but-no-explicit-future-start tube whose computed start day has arrived.
       const bp = v.backward_plan;
       rawItems.push({ vial: v, kind: 'start', due: bp.start_in_days,
         text: bp.start_in_days < -0.5 ? `⏰ Should've started ${-Math.round(bp.start_in_days)}d ago for ${stageLabel(bp.target_stage)} by ${bp.ready_date}` : `⏰ Start today → ${stageLabel(bp.target_stage)} by ${bp.ready_date}` });
@@ -243,6 +253,14 @@ function Flies() {
         tomorrowItems.push({ vial: v, kind: 'target', due: p.eta_to_target_days, text: `${stageLabel(p.target_stage)} window ~${p.eta_to_target_days}d` });
       if (p.clear_parents_in_days != null && p.clear_parents_in_days > 0.5 && p.clear_parents_in_days <= 2)
         tomorrowItems.push({ vial: v, kind: 'parents', due: p.clear_parents_in_days, text: `Clear parents ~${p.clear_parents_in_days}d` });
+    }
+    // Upcoming cross to set up tomorrow (parents-set date == tomorrow).
+    if (isUpcoming(v) && v.start_date) {
+      const setIn = Math.round((new Date(v.start_date + 'T12:00:00') - Date.now()) / 86400000);
+      if (setIn === 1) {
+        const tail = v.backward_plan ? ` for ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : '';
+        tomorrowItems.push({ vial: v, kind: 'start', due: 1, text: `⏰ Set this cross${tail}` });
+      }
     }
   });
   tomorrowItems.sort((a, b) => a.due - b.due);
@@ -537,6 +555,17 @@ function Flies() {
 
   // Group cross cohorts (same lineage_id) under one collapsible header; stocks & single tubes render flat.
   function renderTubeList(tubes) {
+    // Split started/active tubes from not-yet-started (upcoming) crosses; upcoming sink to the bottom.
+    const active = tubes.filter(v => !isUpcoming(v));
+    const upcoming = tubes.filter(v => isUpcoming(v));
+    return [
+      ...renderTubeGroups(active),
+      ...(upcoming.length ? [<div key="upcoming-divider" style={{ fontSize: '0.74rem', fontWeight: 700, color: UPCOMING_COLOR, textTransform: 'uppercase', marginTop: 6, marginBottom: 2 }}>📅 Upcoming — not set yet ({upcoming.length})</div>] : []),
+      ...renderTubeGroups(upcoming),
+    ];
+  }
+
+  function renderTubeGroups(tubes) {
     const groups = {};
     const order = [];
     tubes.forEach(v => {
@@ -579,22 +608,32 @@ function Flies() {
     const isOpen = expanded === v.id;
     const p = v.prediction;
     const fd = flipDueInfo(v);
+    const upcoming = isUpcoming(v);
+    const accent = upcoming ? UPCOMING_COLOR : (v.type === 'cross' ? '#9b59b6' : '#16a085');
     return (
-      <div key={v.id} style={{ border: '1px solid #eee', borderRadius: 10, padding: 12, borderLeft: `4px solid ${v.type === 'cross' ? '#9b59b6' : '#16a085'}` }}>
+      <div key={v.id} style={{ border: '1px solid #eee', borderRadius: 10, padding: 12, borderLeft: `4px solid ${accent}`, background: upcoming ? '#f5fafd' : undefined }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <strong>{v.type === 'cross' ? '⚗️' : '🧪'} {inGroup ? `Set ${setLabel(v)}` : v.name}</strong>
+              {upcoming && <span style={{ fontSize: '0.7rem', background: UPCOMING_COLOR, color: 'white', padding: '1px 6px', borderRadius: 8 }}>upcoming</span>}
               {inGroup && v.holds_parents && <span style={{ fontSize: '0.7rem', background: '#9b59b6', color: 'white', padding: '1px 6px', borderRadius: 8 }}>has parents</span>}
-              {v.type === 'cross' && predBadge(p)}
+              {v.type === 'cross' && !upcoming && predBadge(p)}
               {v.type === 'stock' && fd && <span style={{ fontSize: '0.78rem', color: fd.days <= 0 ? '#c0392b' : fd.days <= 3 ? '#e67e22' : '#888' }}>🔄 {fd.days < 0 ? `overdue ${-fd.days}d` : fd.days === 0 ? 'flip today' : `flip in ${fd.days}d`}</span>}
               {v.snooze_until && v.snooze_until > todayStr() && <span style={{ fontSize: '0.72rem', color: '#9b59b6', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); flyAPI.updateVial(v.id, { snooze_until: '' }).then(() => { setLoading(true); fetchData(); }); }} title="Snoozed — click to un-snooze">💤 until {v.snooze_until} ✕</span>}
             </div>
             {v.genotype && <div style={{ fontSize: '0.8rem', color: '#888' }}>{v.genotype}</div>}
-            {v.backward_plan && v.backward_plan.start_in_days > 0.5 && (
+            {upcoming && (
+              <div style={{ fontSize: '0.8rem', color: UPCOMING_COLOR, marginTop: 2 }}>
+                📅 Set parents on <strong>{v.start_date}</strong>
+                {v.backward_plan ? ` → ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : ''}
+                {(() => { const d = Math.round((new Date(v.start_date + 'T12:00:00') - new Date()) / 86400000); return d <= 0 ? ' (today)' : ` (in ${d}d)`; })()}
+              </div>
+            )}
+            {v.backward_plan && !upcoming && v.backward_plan.start_in_days > 0.5 && (
               <div style={{ fontSize: '0.78rem', color: '#2980b9', marginTop: 2 }}>🎯 start by {v.backward_plan.start_date} for {stageLabel(v.backward_plan.target_stage)} by {v.backward_plan.ready_date} ({v.backward_plan.start_in_days}d)</div>
             )}
-            {v.type === 'cross' && p && (
+            {v.type === 'cross' && p && !upcoming && (
               <div style={{ fontSize: '0.8rem', color: '#666', marginTop: 2 }}>
                 {p.eta_to_target_days != null && <span>🎯 {stageLabel(p.target_stage)} {p.eta_to_target_days <= 0 ? 'now' : `~${p.eta_to_target_days}d`}</span>}
                 {p.clear_parents_in_days != null && <span style={{ marginLeft: 10, color: p.clear_parents_in_days <= 2 ? '#c0392b' : '#666' }}>👪 clear parents {p.clear_parents_in_days <= 0 ? 'now' : `~${p.clear_parents_in_days}d`}</span>}
