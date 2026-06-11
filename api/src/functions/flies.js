@@ -327,7 +327,11 @@ app.http('flyVialsCreate', {
       const table = await getTable('flyvials');
       const now = new Date().toISOString();
       const type = body.type === 'stock' ? 'stock' : 'cross';
-      const startDate = body.start_date || now.split('T')[0];
+      // Crosses may be created "not set yet" (empty start_date) when planning ahead.
+      // Stocks always need a start (their flip schedule keys off it).
+      const startDate = body.start_date != null && body.start_date !== ''
+        ? body.start_date
+        : (type === 'stock' ? now.split('T')[0] : '');
       const flipInterval = body.flip_interval_days != null ? Number(body.flip_interval_days) : 21;
       const id = uuidv4();
       const entity = {

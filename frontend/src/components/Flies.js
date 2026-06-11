@@ -12,8 +12,8 @@ const STAGES = [
 const stageLabel = (v) => (STAGES.find(s => s.value === v) || {}).short || v;
 
 const todayStr = () => new Date().toISOString().split('T')[0];
-// "Upcoming" = a cross whose parents-set date is still in the future (not started yet).
-const isUpcoming = (v) => v.type === 'cross' && v.start_date && v.start_date > todayStr();
+// "Upcoming" = a cross not started yet: either no parents-set date, or a future one.
+const isUpcoming = (v) => v.type === 'cross' && (!v.start_date || v.start_date > todayStr());
 const UPCOMING_COLOR = '#2980b9';
 // Date-based "set" label: month.day, no year (e.g. "6.4"). Falls back to cohort number.
 const setLabel = (v) => {
@@ -55,7 +55,8 @@ function Flies() {
   const [planPreview, setPlanPreview] = useState(null); // live backward-plan preview in tube form
 
   function emptyVialForm() {
-    return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: todayStr(), flip_interval_days: 21, desired_ready_date: '', planned_target_stage: '' };
+    // Crosses default to "not set yet" (empty start_date) so planning ahead is the easy path.
+    return { name: '', type: 'cross', genotype: '', box_id: '', target_stage: 'L3', start_date: '', flip_interval_days: 21, desired_ready_date: '', planned_target_stage: '' };
   }
 
   const fetchData = useCallback(async () => {
@@ -224,18 +225,18 @@ function Flies() {
         rawItems.push({ vial: v, kind: 'transfer', due: p.transfer_due_in_days,
           text: `Transfer parents (${-Math.round(p.transfer_due_in_days)}d overdue)` });
     }
-    // "Set this cross" reminder for an upcoming (not-yet-started) cross: fire on the parents-set day.
-    if (isUpcoming(v) && v.start_date) {
-      const setIn = Math.round((new Date(v.start_date + 'T12:00:00') - Date.now()) / 86400000);
-      if (setIn <= 0) {
-        const tail = v.backward_plan ? ` for ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : '';
-        rawItems.push({ vial: v, kind: 'start', due: setIn, text: `⏰ Set this cross today${tail}` });
-      }
-    } else if (v.backward_plan && v.backward_plan.start_in_days != null && v.backward_plan.start_in_days <= 0.5) {
-      // Planned-but-no-explicit-future-start tube whose computed start day has arrived.
+    // "Set this cross" reminder for an upcoming (not-yet-started) cross.
+    // Timing source: explicit future parents-set date if given, else the backward-plan start date.
+    if (isUpcoming(v)) {
       const bp = v.backward_plan;
-      rawItems.push({ vial: v, kind: 'start', due: bp.start_in_days,
-        text: bp.start_in_days < -0.5 ? `⏰ Should've started ${-Math.round(bp.start_in_days)}d ago for ${stageLabel(bp.target_stage)} by ${bp.ready_date}` : `⏰ Start today → ${stageLabel(bp.target_stage)} by ${bp.ready_date}` });
+      let setIn = null;
+      if (v.start_date) setIn = Math.round((new Date(v.start_date + 'T12:00:00') - Date.now()) / 86400000);
+      else if (bp && bp.start_in_days != null) setIn = bp.start_in_days;
+      if (setIn != null && setIn <= 0.5) {
+        const tail = bp ? ` for ${stageLabel(bp.target_stage)} by ${bp.ready_date}` : '';
+        rawItems.push({ vial: v, kind: 'start', due: setIn,
+          text: setIn < -0.5 ? `⏰ Set this cross (${-Math.round(setIn)}d late)${tail}` : `⏰ Set this cross today${tail}` });
+      }
     }
   });
   // Split into today (due <= 0.5) and tomorrow (the rest, <= 1.5).
@@ -254,12 +255,15 @@ function Flies() {
       if (p.clear_parents_in_days != null && p.clear_parents_in_days > 0.5 && p.clear_parents_in_days <= 2)
         tomorrowItems.push({ vial: v, kind: 'parents', due: p.clear_parents_in_days, text: `Clear parents ~${p.clear_parents_in_days}d` });
     }
-    // Upcoming cross to set up tomorrow (parents-set date == tomorrow).
-    if (isUpcoming(v) && v.start_date) {
-      const setIn = Math.round((new Date(v.start_date + 'T12:00:00') - Date.now()) / 86400000);
-      if (setIn === 1) {
-        const tail = v.backward_plan ? ` for ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : '';
-        tomorrowItems.push({ vial: v, kind: 'start', due: 1, text: `⏰ Set this cross${tail}` });
+    // Upcoming cross to set up tomorrow (parents-set date OR computed start == tomorrow).
+    if (isUpcoming(v)) {
+      const bp = v.backward_plan;
+      let setIn = null;
+      if (v.start_date) setIn = Math.round((new Date(v.start_date + 'T12:00:00') - Date.now()) / 86400000);
+      else if (bp && bp.start_in_days != null) setIn = bp.start_in_days;
+      if (setIn != null && setIn > 0.5 && setIn <= 1.5) {
+        const tail = bp ? ` for ${stageLabel(bp.target_stage)} by ${bp.ready_date}` : '';
+        tomorrowItems.push({ vial: v, kind: 'start', due: setIn, text: `⏰ Set this cross${tail}` });
       }
     }
   });
@@ -415,7 +419,17 @@ function Flies() {
                   {boxes.map(b => <option key={b.id} value={b.id}>{b.name} ({b.temperature}°C)</option>)}
                 </select>
               </div>
-              <div className="form-group"><label>{vialForm.type === 'cross' ? 'Parents set on' : 'Started on'}</label><input type="date" value={vialForm.start_date} onChange={(e) => setVialForm({ ...vialForm, start_date: e.target.value })} /></div>
+              <div className="form-group"><label>{vialForm.type === 'cross' ? 'Parents set on' : 'Started on'}</label>
+                <input type="date" value={vialForm.start_date} onChange={(e) => setVialForm({ ...vialForm, start_date: e.target.value })} />
+                {vialForm.type === 'cross' && (
+                  <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                    {vialForm.start_date
+                      ? <small style={{ color: UPCOMING_COLOR, cursor: 'pointer' }} onClick={() => setVialForm({ ...vialForm, start_date: '' })}>✕ not set yet</small>
+                      : <small style={{ color: '#16a085', cursor: 'pointer' }} onClick={() => setVialForm({ ...vialForm, start_date: todayStr() })}>✓ set today</small>}
+                    {!vialForm.start_date && <small style={{ color: '#999' }}>planned — not started</small>}
+                  </div>
+                )}
+              </div>
             </div>
             {vialForm.type === 'cross' ? (
               <div className="form-group"><label>Target stage to catch</label>
@@ -625,9 +639,16 @@ function Flies() {
             {v.genotype && <div style={{ fontSize: '0.8rem', color: '#888' }}>{v.genotype}</div>}
             {upcoming && (
               <div style={{ fontSize: '0.8rem', color: UPCOMING_COLOR, marginTop: 2 }}>
-                📅 Set parents on <strong>{v.start_date}</strong>
-                {v.backward_plan ? ` → ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : ''}
-                {(() => { const d = Math.round((new Date(v.start_date + 'T12:00:00') - new Date()) / 86400000); return d <= 0 ? ' (today)' : ` (in ${d}d)`; })()}
+                {v.start_date ? (
+                  <>📅 Set parents on <strong>{v.start_date}</strong>
+                  {v.backward_plan ? ` → ${stageLabel(v.backward_plan.target_stage)} by ${v.backward_plan.ready_date}` : ''}
+                  {(() => { const d = Math.round((new Date(v.start_date + 'T12:00:00') - new Date()) / 86400000); return d <= 0 ? ' (today)' : ` (in ${d}d)`; })()}</>
+                ) : v.backward_plan ? (
+                  <>📅 Not set yet — set by <strong>{v.backward_plan.start_date}</strong> for {stageLabel(v.backward_plan.target_stage)} by {v.backward_plan.ready_date}
+                  {v.backward_plan.start_in_days <= 0 ? ' (now!)' : ` (in ${v.backward_plan.start_in_days}d)`}</>
+                ) : (
+                  <>📅 Not set yet — add a “want ready by” date to get a set-up reminder</>
+                )}
               </div>
             )}
             {v.backward_plan && !upcoming && v.backward_plan.start_in_days > 0.5 && (
